@@ -1,0 +1,103 @@
+# Minimal Iggy -> Flink connector experiment (see docs/architecture.md).
+#
+#   docker compose up --build            # iggy, setup, Flink JM + 2 TMs, replay producer
+#   docker compose logs -f taskmanager   # per-node counters
+#   docker compose run --rm replay-producer   # replay the CSV again
+#
+# Flink UI: http://localhost:8081
+
+x-iggy-env: &iggy-env
+  IGGY_USERNAME: iggy
+  IGGY_PASSWORD: iggy
+  IGGY_STREAM: trading
+  IGGY_TOPIC: ticks
+  IGGY_CONSUMER_GROUP: ${IGGY_CONSUMER_GROUP:-flink}
+
+x-flink-env: &flink-env
+  <<: *iggy-env
+  IGGY_ADDRESS: iggy:8090
+  IGGY_POLL_BATCH: ${IGGY_POLL_BATCH:-100}
+  PIPELINE: ${PIPELINE:-full}          # full | count (source only)
+  REPORT_INTERVAL_MS: ${REPORT_INTERVAL_MS:-5000}
+  FLINK_PROPERTIES: |
+    jobmanager.rpc.address: jobmanager
+    taskmanager.numberOfTaskSlots: 1
+    parallelism.default: 2
+    execution.checkpointing.interval: ${CHECKPOINT_INTERVAL:-10 s}
+    restart-strategy.type: fixed-delay
+    restart-strategy.fixed-delay.attempts: 10
+    restart-strategy.fixed-delay.delay: 5 s
+
+services:
+  iggy:
+    image: apache/iggy:0.10.0
+    cap_add: [SYS_NICE]
+    security_opt: [seccomp:unconfined]
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    environment:
+      IGGY_ROOT_USERNAME: iggy
+      IGGY_ROOT_PASSWORD: iggy
+      IGGY_NODE_ADVERTISED_ADDRESS: iggy
+      # 0.10 defaults to loopback binds, which are unreachable from other containers
+      IGGY_TCP_ADDRESS: 0.0.0.0:8090
+      IGGY_HTTP_ADDRESS: 0.0.0.0:3000
+      IGGY_QUIC_ENABLED: "false"
+      IGGY_WEBSOCKET_ENABLED: "false"
+      # default NUMA-aware allocation fails inside a container ("only 0 available")
+      IGGY_SHARDING_CPU_ALLOCATION: ${IGGY_SHARDS:-2}
+      IGGY_SHARDING_PIN_CORES: "false"
+    ports:
+      - "8090:8090"   # TCP
+      - "3000:3000"   # HTTP API
+    volumes:
+      - iggy-data:/local_data
+
+  # Creates stream / topic / consumer group (the Flink connector expects the group to exist).
+  # PRODUCER_DIR=producer (Java, default) or producer-rs (Rust drop-in); both build the same CLI.
+  iggy-setup:
+    build: ./${PRODUCER_DIR:-producer}
+    image: scalable/${PRODUCER_DIR:-producer}
+    command: ["setup"]
+    environment:
+      <<: *iggy-env
+      IGGY_HOST: iggy
+      IGGY_PARTITIONS: ${IGGY_PARTITIONS:-4}
+    depends_on: [iggy]
+
+  jobmanager:
+    build: ./flink-job
+    image: scalable/flink-job
+    command: standalone-job --job-classname scalable.flink.ConnectorTestJob
+    ports:
+      - "8081:8081"
+    environment: *flink-env
+    depends_on:
+      iggy-setup: { condition: service_completed_successfully }
+
+  taskmanager:
+    image: scalable/flink-job
+    command: taskmanager
+    deploy:
+      replicas: 2
+    environment: *flink-env
+    depends_on: [jobmanager]
+
+  replay-producer:
+    image: scalable/${PRODUCER_DIR:-producer}
+    command: ["replay"]
+    environment:
+      <<: *iggy-env
+      IGGY_HOST: iggy
+      CSV_FILE: ${CSV_FILE:-/data/pala.csv}
+      REPEAT: ${REPEAT:-1}
+      RATE: ${RATE:-0}
+      BATCH_SIZE: ${BATCH_SIZE:-4000}
+      IGGY_TCP_NODELAY: ${IGGY_TCP_NODELAY:-true}   # Rust producer only (Java SDK always sets it)
+    volumes:
+      - ${DATA_DIR:-./docs}:/data:ro
+    depends_on:
+      iggy-setup: { condition: service_completed_successfully }
+
+volumes:
+  iggy-data:

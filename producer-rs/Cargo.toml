@@ -1,0 +1,17 @@
+[package]
+name = "replay-producer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Rust drop-in replacement for producer/ (same env vars, modes and log lines)"
+publish = false
+
+[dependencies]
+# iggy crate 0.12.0 is the release that matches Iggy server 0.10.0 (both 2026-11-07)
+iggy = "=0.12.0"
+bytes = "1.12"   # same major version as the SDK, to build IggyMessage directly
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
