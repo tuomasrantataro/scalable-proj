@@ -14,7 +14,7 @@ Is a single source reader fast enough, given that the connector gives every part
 |---|---|
 | Date | 2026-11-16 |
 | Host | Laptop, AMD Ryzen 7 5825U (8 cores / 16 threads), 35 GB RAM, Linux 7.3 (Fedora), Docker 29.10. All containers on one host. |
-| Iggy | 0.10.0, 2 shards, cores not pinned, 1 topic `ticks` with 4 partitions |
+| Iggy | 0.10.0, 2 shards, cores not pinned, 1 topic `ticks` with 4 partitions (source and producer benchmarks; the sink test and the current default use 1 partition) |
 | Flink | 2.3.0, 1 JobManager + 2 TaskManagers × 1 slot, parallelism 2, checkpoints every 10 s |
 | Active source readers | 1 in every run (connector behaviour, see README) |
 | Producer | `replay-producer`: one thread, 4000 rows per batch, one send call per partition. The partition is chosen by symbol hash. Two implementations: Java (`producer/`) and Rust (`producer-rs/`, a drop-in replacement with the same CLI, env vars and partitioning), chosen with `PRODUCER_DIR`. |
@@ -132,6 +132,104 @@ per-partition counts `[40, 64, 52, 44]`.
 **Fix:** the Rust producer builds `IggyMessage` directly and sets `origin_timestamp` once per batch
 (one clock read per 4000 rows). On a host whose clock source is TSC, the original version would have lost only about 1 s,
 so this slowdown is specific to this laptop.
+
+## Sink: Flink JDBC connector on Flink 2.3 with TimescaleDB (2026-11-18)
+
+Question: does the Flink JDBC connector, whose newest release is `flink-connector-jdbc-core:4.1.0-2.2`
+(built for Flink 2.2 and compiled against Flink 2.0.0), work on Flink 2.3?
+
+Script: [`bench/jdbc_sink_test.py`](bench/jdbc_sink_test.py). Job: `PIPELINE=jdbc` in
+[`JdbcSinkPipeline.java`](flink-job/src/main/java/scalable/flink/JdbcSinkPipeline.java):
+- price events only (`Last` set); event time = `Date` + `Trading time`
+- watermarks with 60 s bounded out-of-orderness and 10 s idleness
+- `keyBy(symbol)`, 5-minute tumbling event-time windows that keep the last price by event time and a tick count
+- `JdbcSink` (at-least-once) writing `INSERT … ON CONFLICT (symbol, window_end) DO UPDATE` into the hypertable `window_close`
+  ([schema](config/timescaledb/init.sql)). A `writes` column counts how many times each row was written.
+
+Data: full trading day (53,994,554 rows, 11,856,732 price events), poll batch 5000, checkpoints every 10 s,
+TimescaleDB 2.31.0 (PostgreSQL 17), PostgreSQL JDBC driver 42.7.12.
+
+### Result: the connector works on Flink 2.3
+
+| Phase (1-partition topic) | Result |
+|---|---|
+| A: baseline | 381,395 window rows, each written once, 37 late events. **Identical digest in two separate fresh runs.** About 93 s from start to the last row. |
+| B: same data again, table not truncated | Same 381,395 rows, **identical content**, and every row has `writes` = 2. The upsert is idempotent. |
+| C: kill a TaskManager mid-run (recovered runs) | The sink behaved correctly: windows re-emitted after the restore were upserted (2,965 and 6,001 rows with `writes` > 1), with no duplicate keys and no extra rows. **But data was lost upstream** (see below). |
+| D: no idleness (`IDLENESS_S=0`) | 0 rows. Details below. |
+
+### Finding 1: with several partitions, about half the events arrive late
+
+With the default 4-partition topic, phase A counted **6,404,050 late events (54% of the price events)** and wrote
+only **193,423 rows**, half of the 381,395 the 1-partition run writes. A repeat (phase B) gave a different
+result: 195,030 rows and 6,437,919 late events.
+
+The cause is the connector, not the data. In file order only **41 of 11,856,732** price events are more
+than 60 s behind the running maximum. That was checked with `awk` over the file, and the 1-partition job
+saw 37. The connector merges all partitions in one reader into a single queue, and there is one watermark
+per reader, not per partition (split). The partition furthest ahead in event time pushes the watermark
+forward, so events from the other partitions are late. Which events that hits depends on poll timing, so
+runs don't match each other.
+
+**Consequence:** with this connector, event-time results are only correct with a **1-partition topic**, or
+with a custom source that emits per-split watermarks. One partition costs nothing, because the connector
+uses only one reader anyway (see the README).
+
+### Finding 2: failover loses data (at-most-once delivery, now measured)
+
+Phase C compared with phase A, 1 partition, in two runs that recovered:
+
+| Run | Restored from | Ticks lost | Windows missing | Windows with fewer ticks | Windows with more ticks |
+|---|---|---:|---:|---:|---:|
+| 1 | checkpoint 3 | 180,167 (1.5%) | 1,480 | 5,624 | 0 |
+| 2 | checkpoint 4 | 128,064 (1.1%) | 287 | 5,657 | 0 |
+
+Flink restores the window state from the checkpoint, but the connector resumes reading from the offset
+already committed in the Iggy consumer group. Every event read between the checkpoint and the crash is
+skipped. In run 1, all damaged windows fell between 10:35 and 11:25 in event time, the part of the data
+being processed around the crash. This confirms the at-most-once behaviour that the connector code had
+suggested (see README).
+
+### Finding 3: failover sometimes does not recover at all
+
+In one of three runs, after the kill, the job reported RUNNING again (2 restarts, restored from the
+checkpoint) but **stopped producing output**. It wrote 554 more rows and then stopped, leaving 261,149
+windows missing. Four more kills, alternating between the two TaskManagers and capturing coordinator logs
+in case of a stall, all recovered. **In total, 1 of 7 failovers stalled.** The cause is not known, because
+the stall was not reproduced with diagnostics on. It looks like the same kind of problem as the split loss
+without checkpointing (README): the split is assigned to no reader, so the job is RUNNING but reads nothing.
+This is unconfirmed. Check after any failover that output resumes, for example that the Iggy consumer-group
+offset moves forward.
+
+### Finding 4: without idleness, windows never fire and checkpoints fail
+
+Phase D (`IDLENESS_S=0`), confirmed in two runs:
+- **The watermark never moves:** the window operator's watermark stays at `Long.MIN_VALUE`, because the
+  second source reader never gets a split and holds back the minimum.
+- **No window fires** and every tick stays in window state.
+- **Checkpoints fail:** within a few checkpoints the state passes 6 MB, more than the 5 MB limit of Flink's
+  default in-memory (JobManager) checkpoint storage. The checkpoint fails ("Size of the state is larger than
+  the maximum permitted memory-backed state") and the job restarts in a loop.
+
+`withIdleness` is therefore required, and **checkpoints must go to a file system**.
+
+**Fixed (2026-11-18):** compose now sets `execution.checkpointing.storage: filesystem` and
+`execution.checkpointing.dir: file:///flink-checkpoints`, on a `flink-checkpoints` volume shared by the JobManager
+and TaskManagers. Phase D repeated with this setting: the window state grew to **36.6 MB** (about 381k open windows,
+7× the old limit), checkpoints kept completing to `file:/flink-checkpoints/<job>/chk-N`, and the job had **0
+failures** in 90 s. The REST API counted 1 failed checkpoint, which did not fail the job; its cause was not
+checked. Phases A–C gave the same results as with in-memory storage: the same phase A digest, and a failover
+restored from the file checkpoint lost 1.0% of the ticks (994 windows missing, 5,644 short, 2,993 re-emitted
+and upserted).
+
+### Setup issues found along the way
+
+- `flink-connector-base` is already in `flink-dist` 2.3.0, so it is `provided`. Only the JDBC connector and
+  the PostgreSQL driver are bundled.
+- TimescaleDB in Docker needs `shm_size` above Docker's 64 MB default. Otherwise parallel queries fail with
+  "could not resize shared memory segment … No space left on device".
+- Flink 2.3's REST API reports where a subtask runs as `endpoint` (container hostname and port), not `host`.
+- The REST `write-records` metric of the source vertex often read 0 while data was flowing. Don't rely on it.
 
 ## Results: `docs/pala.csv` repeated (first run, superseded)
 

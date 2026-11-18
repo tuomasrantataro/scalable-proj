@@ -107,7 +107,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repeat", type=int, default=10000, help="CSV repetitions to preload (x200 msgs)")
     ap.add_argument("--batches", default="100,1000,5000", help="IGGY_POLL_BATCH values")
-    ap.add_argument("--partitions", default="4")
+    ap.add_argument("--partitions", default="1", help="MEASUREMENTS.md results used 4")
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--skip-live", action="store_true")
     ap.add_argument("--data-dir", default="./docs", help="host directory mounted at /data")

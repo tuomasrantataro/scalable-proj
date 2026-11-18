@@ -8,6 +8,7 @@ import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.iggy.connector.config.IggyConnectionConfig;
 import org.apache.iggy.connector.config.OffsetConfig;
 import org.apache.iggy.connector.flink.source.IggySource;
+import org.apache.iggy.connector.serialization.DeserializationSchema;
 
 /**
  * Connector smoke test: Iggy source (parallel) → per-node counter → keyBy(symbol) per-node counter,
@@ -25,7 +26,38 @@ public final class ConnectorTestJob {
     public static void main(String[] args) throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-        IggySource<Tick> source = IggySource.<Tick>builder()
+        String pipeline = envOr("PIPELINE", "full");
+
+        // PIPELINE=jdbc: price events -> 5-min windows -> TimescaleDB via the Flink JDBC connector.
+        if ("jdbc".equals(pipeline)) {
+            JdbcSinkPipeline.build(env, source(new PriceDeserializer()));
+            env.execute("jdbc-sink-test");
+            return;
+        }
+
+        IggySource<Tick> source = source(new TickDeserializer());
+
+        DataStream<Tick> ticks = env
+                .fromSource(source, WatermarkStrategy.noWatermarks(), "iggy-source", TypeInformation.of(Tick.class))
+                .map(new NodeCounter()).name("node-counter");
+
+        // PIPELINE=count: source -> node-counter -> discard only, to measure the source on its own.
+        if ("count".equals(pipeline)) {
+            ticks.sinkTo(new DiscardingSink<>()).name("discard");
+        } else {
+            ticks.keyBy(t -> t.symbol)
+                    .map(new SymbolCounter()).name("symbol-counter")
+                    .sinkTo(new DiscardingSink<>()).name("discard-keyed");
+
+            ticks.map(new Verifier()).name("verifier").setParallelism(1)
+                    .sinkTo(new DiscardingSink<>()).name("discard-verifier").setParallelism(1);
+        }
+
+        env.execute("iggy-connector-test");
+    }
+
+    static <T> IggySource<T> source(DeserializationSchema<T> deserializer) {
+        return IggySource.<T>builder()
                 .setConnectionConfig(IggyConnectionConfig.builder()
                         .serverAddress(envOr("IGGY_ADDRESS", "iggy:8090"))
                         .username(envOr("IGGY_USERNAME", "iggy"))
@@ -38,26 +70,8 @@ public final class ConnectorTestJob {
                         .resetStrategy(OffsetConfig.OffsetResetStrategy.EARLIEST)
                         .build())
                 .setPollBatchSize(Long.parseLong(envOr("IGGY_POLL_BATCH", "100")))
-                .setDeserializer(new TickDeserializer())
+                .setDeserializer(deserializer)
                 .build();
-
-        DataStream<Tick> ticks = env
-                .fromSource(source, WatermarkStrategy.noWatermarks(), "iggy-source", TypeInformation.of(Tick.class))
-                .map(new NodeCounter()).name("node-counter");
-
-        // PIPELINE=count: source -> node-counter -> discard only, to measure the source on its own.
-        if ("count".equals(envOr("PIPELINE", "full"))) {
-            ticks.sinkTo(new DiscardingSink<>()).name("discard");
-        } else {
-            ticks.keyBy(t -> t.symbol)
-                    .map(new SymbolCounter()).name("symbol-counter")
-                    .sinkTo(new DiscardingSink<>()).name("discard-keyed");
-
-            ticks.map(new Verifier()).name("verifier").setParallelism(1)
-                    .sinkTo(new DiscardingSink<>()).name("discard-verifier").setParallelism(1);
-        }
-
-        env.execute("iggy-connector-test");
     }
 
     static String envOr(String key, String def) {

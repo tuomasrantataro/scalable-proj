@@ -36,6 +36,24 @@
             <version>2.0.17</version>
             <scope>provided</scope>
         </dependency>
+        <!-- JDBC sink test (PIPELINE=jdbc). No build for Flink 2.3 exists yet; 4.1.0-2.2 is the newest. -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-jdbc-core</artifactId>
+            <version>4.1.0-2.2</version>
+        </dependency>
+        <dependency>
+            <!-- compile-time only: flink-dist 2.3.0 already contains connector-base -->
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-base</artifactId>
+            <version>${flink.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.12</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.iggy</groupId>
             <artifactId>flink-connector</artifactId>

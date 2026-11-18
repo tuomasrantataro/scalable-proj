@@ -49,7 +49,7 @@ impl Config {
             stream: env("IGGY_STREAM", "trading"),
             topic: env("IGGY_TOPIC", "ticks"),
             group: env("IGGY_CONSUMER_GROUP", "flink"),
-            partitions: env("IGGY_PARTITIONS", "4").parse()?,
+            partitions: env("IGGY_PARTITIONS", "1").parse()?,
             csv_file: env("CSV_FILE", "/data/pala.csv"),
             repeat: env("REPEAT", "1").parse()?,
             rate: env("RATE", "0").parse()?,

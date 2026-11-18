@@ -15,12 +15,12 @@ Throughput numbers: [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 | Deployment | **Docker Compose** | Single-command, reproducible local or single-VM setup. Flink TaskManagers can be scaled with `docker compose up --scale`. |
 | Versions | **Iggy 0.10.0** (server and Java SDK), **Flink 2.3.0** | The Iggy Flink connector 0.10.0 is built against Flink 2.3.0, so the versions are pinned together. |
 | Language | **Java 17** for the Flink job. Replay producer in **Java or Rust** (drop-in replacements, same CLI and partitioning) | The Rust producer is faster: 1.92M vs 1.39–1.42M msg/s for one trading day. Either is fast enough, because the job limits end-to-end throughput at ~830k msg/s. The Rust SDK reads the clock once per message, which is slow on hosts whose clock source is HPET, so the Rust producer timestamps once per batch ([`MEASUREMENTS.md`](../MEASUREMENTS.md)). |
-| Iggy → Flink integration | **Official connector `org.apache.iggy:flink-connector:0.10.0`**, with checkpointing always on and poll batch ≥ 1000 | Works with several TaskManagers and delivered every message without loss or duplicates in our tests. Limits: one active reader, at-most-once, no recovery without checkpointing (see §4.1, §4.3, §7). A **custom Flink source** remains the fallback if exactly-once is required. |
+| Iggy → Flink integration | **Official connector `org.apache.iggy:flink-connector:0.10.0`**, with checkpointing always on and poll batch ≥ 1000 | Works with several TaskManagers and delivers every message without loss or duplicates in normal operation. Limits: one active reader; one watermark per reader, so the topic needs 1 partition (§3.4); at-most-once, which lost 1.0–1.5% of a day's price events per TaskManager failure; no recovery without checkpointing; and 1 of 7 failovers stalled (see §4.1, §4.3, §7). A **custom Flink source** remains the fallback if exactly-once is required. |
+| Result storage | **TimescaleDB 2.31 (PostgreSQL 17)**, written by the Flink JDBC sink (`flink-connector-jdbc-core:4.1.0-2.2` + PostgreSQL driver 42.7.12) with `INSERT … ON CONFLICT (symbol, window_end) DO UPDATE` | Exact, idempotent upserts on a real primary key, so replays after a restart are harmless. Plain SQL for the pandas correctness comparison, and a built-in Grafana data source. Tested on Flink 2.3 (no build for 2.3 exists yet): identical results across runs, idempotent re-runs, and re-emitted windows absorbed after failover ([`MEASUREMENTS.md`](../MEASUREMENTS.md)). Rejected: InfluxDB (no maintained Flink connector, awkward for relational checks) and ClickHouse (upserts only eventually deduplicated; its scale is not needed: at most ~1.6M rows/day). |
 
 ### 1.2 Proposed (not yet decided)
 | Concern | Proposal | Alternatives |
 |---|---|---|
-| Result storage | TimescaleDB (PostgreSQL), written by the Flink JDBC sink | InfluxDB, ClickHouse |
 | Advisory delivery | Iggy output topic `advisories` | — |
 | Visualization | Grafana dashboards over TimescaleDB | Custom web app with WebSocket push |
 | Metrics | Prometheus + Grafana (Flink Prometheus reporter, Iggy metrics endpoint, cAdvisor for container CPU and memory) | — |
@@ -52,7 +52,7 @@ Throughput numbers: [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 |---|---|
 | `replay-producer` | Reads the daily CSV files in order and skips the `#` comment lines and the header. Drops irrelevant events early, or forwards everything (configurable, see §3.1). Picks the partition **from the symbol ID hash** and sends one batch per partition (4000 rows per flush). Supports a speed-up factor (1×, 10×, …, max) and stamps an ingestion timestamp for latency measurement. *Implemented: partitioning, batching, `RATE` (msg/s) and `REPEAT`. Not yet implemented: event filtering, event-time replay speed-up, ingestion timestamp.* |
 | `iggy-setup` | One-shot job (same image as the producer). Creates the stream, the topics and the Flink consumer group. The connector does not create the consumer group itself. |
-| `iggy` | Stream `trading`, with topics `ticks` (input, N partitions, currently 4), `advisories` (output) and `subscriptions` (control). Iggy 0.10 needs explicit container settings: bind addresses `0.0.0.0` (the default is loopback), an explicit shard count (`IGGY_SHARDING_CPU_ALLOCATION`; the default NUMA-aware allocation fails inside Docker), and core pinning off. |
+| `iggy` | Stream `trading`, with topics `ticks` (input, N partitions, **1 by default** while using the connector, see §3.4), `advisories` (output) and `subscriptions` (control). Iggy 0.10 needs explicit container settings: bind addresses `0.0.0.0` (the default is loopback), an explicit shard count (`IGGY_SHARDING_CPU_ALLOCATION`; the default NUMA-aware allocation fails inside Docker), and core pinning off. |
 | `flink-jobmanager` | Runs the job in **standalone application mode**. |
 | `flink-taskmanager` | Workers. Replicated with `--scale taskmanager=k`. |
 | `timescaledb` | Stores EMA results and advisories for subscribed symbols, for the visualization and correctness checks. |
@@ -73,7 +73,8 @@ Filtering non-price events in the producer reduces load substantially: about 59 
 
 ### 3.2 Flink job topology
 ```
-IggySource (official connector, one split per partition; in practice one active reader, see §4.1)
+IggySource (official connector, one split per partition; in practice one active reader, see §4.1;
+           topic `ticks` must have 1 partition for correct event time, see §3.4)
   → parse / filter (price events only)
   → assign timestamps + watermarks (bounded out-of-orderness)
   → keyBy(symbol)
@@ -92,7 +93,8 @@ IggySource (official connector, one split per partition; in practice one active 
 
 ### 3.4 Watermarks and late events (NFR-7)
 - Strategy: `forBoundedOutOfOrderness(D)`, with D configurable (initial value of a few seconds; to be tuned from a dataset analysis of the actual disorder).
-- `withIdleness` so that idle partitions (nights, weekend) do not stall the watermark.
+- `withIdleness` so that idle partitions (nights, weekend) do not stall the watermark. *Required in any case with the connector: the second source reader never gets a split, and without idleness the watermark stays at `Long.MIN_VALUE` and no window ever fires (measured).*
+- **Use a 1-partition topic with the connector.** It has one watermark per reader, not per partition. With 4 partitions, 54% of the price events arrived late (60 s bound) and half the windows were lost; with 1 partition, 37 events were late (41 in file order). One partition costs nothing, since only one reader is active anyway. A custom source with per-split watermarks would remove this limit.
 - Events later than D plus allowed lateness go to a **side output** and are counted. The rate of late events is reported in the evaluation.
 - The latency/correctness trade-off of D is a design exploration item: measure the late-event count against output latency for several values of D.
 
@@ -144,9 +146,10 @@ Docker Compose has no built-in autoscaling. The plan in increasing ambition:
 Limits: scaling is bounded by a single host's resources. The Iggy server is single-node, so it scales vertically only. Both limits are documented in the report.
 
 ### 4.3 Fault tolerance
-- Flink checkpoints every 30 s (configurable) to a shared Docker volume. *The experiment used 10 s, in-memory.*
+- Flink checkpoints every 30 s (configurable) to a shared Docker volume. *Configured: `execution.checkpointing.storage: filesystem` with `execution.checkpointing.dir: file:///flink-checkpoints` on the `flink-checkpoints` volume (10 s interval for experiments). The earlier in-memory default is capped at 5 MB, and growing window state exceeded it.*
 - **Checkpointing is required.** Without it, if a TaskManager is lost the job returns to RUNNING but reads nothing: the connector's `addSplitsBack` loses the splits. With checkpointing, the job recovers from the checkpoint and the splits move to the surviving reader (tested by killing a TaskManager).
-- **Delivery is at-most-once, not exactly-once.** The connector reads with Iggy consumer-group offsets (`PollingStrategy.next()`) and commits them when a batch is fetched. It does not read from the offsets stored in the Flink checkpoint. Records fetched but not processed before a crash would be skipped. This follows from the connector code; it was not reproduced, because the job was idle when the TaskManager was killed. Exactly-once needs a source that seeks to the checkpointed offsets (§7).
+- **Delivery is at-most-once, not exactly-once (measured).** The connector reads with Iggy consumer-group offsets (`PollingStrategy.next()`), commits them when a batch is fetched, and ignores the offsets in the Flink checkpoint. After a TaskManager kill, the job restored its window state from the checkpoint but resumed reading past it: 1.1–1.5% of a day's price events were lost (128k–180k ticks, 287–1,480 windows missing, about 5,600 windows short). Exactly-once needs a source that seeks to the checkpointed offsets (§7).
+- **Failover is not always reliable.** 1 of 7 failovers left the job RUNNING but producing nothing (cause not found). Monitor that the consumer offset or output keeps moving after a restart.
 - Output sinks are idempotent (upsert on symbol + window) to tolerate replays.
 
 ---
@@ -191,7 +194,8 @@ autoscaler/          (stretch) custom scaling controller
 |---|---|
 | Iggy Flink connector is immature. *Confirmed: it is released (0.10.0), but has one active reader, at-most-once delivery, loses splits without checkpointing, and busy-polls when idle.* | Always enable checkpointing, and use poll batch ≥ 1000. Accept a single reader, since it is measured to be fast enough (§4.1). If exactly-once or rescaling is required, write a custom source with the Iggy Java SDK: explicit offsets kept in checkpoint state, `SourceReaderBase`, splits assigned to subtasks deterministically, and per-partition watermarks. Keep the source behind an interface so it can be swapped. |
 | Producer or a single Iggy node becomes the bottleneck | *Not a bottleneck so far:* the producer sends 1.5M msg/s on one thread, and Iggy used 20–60% of one core. If needed later: binary serialization, several producer threads, or the Rust producer. |
-| Readers without partitions stall the event-time watermark | With the connector, the idle reader never gets a split. Use `withIdleness` in the watermark strategy, or the idle reader holds back the watermark and windows never fire. To be verified when windows are added. |
+| Readers without partitions stall the event-time watermark | *Confirmed:* without `withIdleness` the watermark stays at `Long.MIN_VALUE`, no window fires, and state grows until checkpoints fail. Always use `withIdleness`. |
+| One watermark for several partitions makes events late | *Confirmed:* with 4 partitions, 54% of price events were late. Use a 1-partition topic while using the connector, or a custom source with per-split watermarks. |
 | Watermark stalls on idle partitions | `withIdleness`, plus monitoring of watermark lag. |
 | Single-host limits hide scaling effects | Use a larger VM for evaluation runs, and report the results relative to the host's cores. |
 | Tight schedule (deadline 27.11.2026) | Implement in order: correctness → metrics → visualization → scaling. Each step is independently demonstrable. |

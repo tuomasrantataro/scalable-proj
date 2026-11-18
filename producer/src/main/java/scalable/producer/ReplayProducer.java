@@ -36,7 +36,7 @@ public final class ReplayProducer {
     private static final String STREAM = env("IGGY_STREAM", "trading");
     private static final String TOPIC = env("IGGY_TOPIC", "ticks");
     private static final String GROUP = env("IGGY_CONSUMER_GROUP", "flink");
-    private static final int PARTITIONS = Integer.parseInt(env("IGGY_PARTITIONS", "4"));
+    private static final int PARTITIONS = Integer.parseInt(env("IGGY_PARTITIONS", "1"));
 
     private static final String CSV_FILE = env("CSV_FILE", "/data/pala.csv");
     /** How many times to replay the file (to generate more volume). */
