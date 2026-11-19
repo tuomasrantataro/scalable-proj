@@ -66,11 +66,7 @@ public final class ConnectorTestJob {
 
     public static <T> IggySource<T> source(DeserializationSchema<T> deserializer) {
         return IggySource.<T>builder()
-                .setConnectionConfig(IggyConnectionConfig.builder()
-                        .serverAddress(envOr("IGGY_ADDRESS", "iggy:8090"))
-                        .username(envOr("IGGY_USERNAME", "iggy"))
-                        .password(envOr("IGGY_PASSWORD", "iggy"))
-                        .build())
+                .setConnectionConfig(iggyConnection())
                 .setStreamId(envOr("IGGY_STREAM", "trading"))
                 .setTopicId(envOr("IGGY_TOPIC", "ticks"))
                 .setConsumerGroup(envOr("IGGY_CONSUMER_GROUP", "flink"))
@@ -79,6 +75,15 @@ public final class ConnectorTestJob {
                         .build())
                 .setPollBatchSize(Long.parseLong(envOr("IGGY_POLL_BATCH", "100")))
                 .setDeserializer(deserializer)
+                .build();
+    }
+
+    /** Iggy server and credentials, shared by the source and the advisory sink. */
+    public static IggyConnectionConfig iggyConnection() {
+        return IggyConnectionConfig.builder()
+                .serverAddress(envOr("IGGY_ADDRESS", "iggy:8090"))
+                .username(envOr("IGGY_USERNAME", "iggy"))
+                .password(envOr("IGGY_PASSWORD", "iggy"))
                 .build();
     }
 

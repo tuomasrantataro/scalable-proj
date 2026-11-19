@@ -7,7 +7,7 @@ Detecting trading trends in the DEBS 2022 tick data: Iggy → Flink → Timescal
 | Service | What it does |
 |---|---|
 | `iggy` | Apache Iggy 0.10.0 server (TCP 8090, HTTP 3000) |
-| `iggy-setup` | One-shot: creates stream `trading`, topic `ticks` (1 partition by default, see below), consumer group `flink`, and output topic `advisories` (1 partition, `IGGY_ADVISORIES_PARTITIONS`; not written to yet) |
+| `iggy-setup` | One-shot: creates stream `trading`, topic `ticks` (1 partition by default, see below), consumer group `flink`, and output topic `advisories` (1 partition, `IGGY_ADVISORIES_PARTITIONS`; BUY/SELL advisories as JSON from `PIPELINE=ema`) |
 | `jobmanager` | Flink 2.3.0, standalone application mode, runs `scalable.flink.ConnectorTestJob`; `PIPELINE` picks the pipeline: `ema` (default), `full`, `count`, `jdbc` (UI: http://localhost:8081) |
 | `taskmanager` ×2 | 1 slot each, job parallelism 2 |
 | `timescaledb` | TimescaleDB 2.31 (PostgreSQL 17), [schema](config/timescaledb/init.sql): `ema_window` + view `advisories`, `data_issue` + view `data_issue_summary` (`PIPELINE=ema`), `window_close` (`PIPELINE=jdbc`) |
@@ -21,7 +21,8 @@ IggySource → parse price rows → watermarks (OUT_OF_ORDERNESS_S, IDLENESS_S)
   → quality gate ─────────────────────────────────────────────┐ zero prices: dropped, counted
   → keyBy(symbol) → 5-min event-time window: close = latest event time ── late events ──┤
   → keyBy(symbol) → EMA function: EMA38, EMA100, BUY/SELL (keyed state) ── price jumps ──┤
-  → TimescaleDB ema_window (upsert)                            TimescaleDB data_issue ◄─┘
+  ├→ TimescaleDB ema_window (upsert)                           TimescaleDB data_issue ◄─┘
+  └→ BUY/SELL only → Iggy topic `advisories` (one JSON message per advisory, at-least-once)
 ```
 
 Connector test pipelines: `full` (source → per-node counter → keyBy counter, plus a verifier for lost or
@@ -51,6 +52,8 @@ for d in 08 09 10 11 12 13 14; do
 done
 docker compose exec timescaledb psql -U postgres -d trading -c 'SELECT * FROM data_issue_summary'
 docker compose exec timescaledb psql -U postgres -d trading -c 'SELECT type, count(*) FROM advisories GROUP BY 1'
+docker compose exec iggy iggy -u iggy -p iggy --tcp-server-address 127.0.0.1:8090 \
+    message poll --offset 0 -m 5 trading advisories 0                     # first advisories from the topic
 ```
 
 Flink unit tests run in the image build (`docker compose build jobmanager`).

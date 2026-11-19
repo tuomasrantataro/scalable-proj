@@ -54,8 +54,8 @@ impl Config {
             group: env("IGGY_CONSUMER_GROUP", "flink"),
             partitions: env("IGGY_PARTITIONS", "1").parse()?,
             advisories_topic: env("IGGY_ADVISORIES_TOPIC", "advisories"),
-            // 1 by default: the connector's sink partitions round-robin only, so more partitions could
-            // reorder a symbol's advisories.
+            // 1 by default: the connector's sink picks one partition per batch, not per message, so with
+            // more partitions a symbol's advisories could be spread and read out of order.
             advisories_partitions: env("IGGY_ADVISORIES_PARTITIONS", "1").parse()?,
             csv_file: env("CSV_FILE", "/data/pala.csv"),
             repeat: env("REPEAT", "1").parse()?,

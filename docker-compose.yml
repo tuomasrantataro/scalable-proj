@@ -29,6 +29,9 @@ x-flink-env: &flink-env
   # PIPELINE=ema data-quality report thresholds
   SKEW_REPORT_S: ${SKEW_REPORT_S:-3600}             # Trading time vs system Time
   PRICE_JUMP_REPORT: ${PRICE_JUMP_REPORT:-0.10}     # close vs previous close of the symbol
+  # Advisories per Iggy send. 1 = each advisory is sent as soon as it is computed; with larger batches the
+  # connector holds a partial batch until the next checkpoint (up to CHECKPOINT_INTERVAL).
+  IGGY_ADVISORY_BATCH: ${IGGY_ADVISORY_BATCH:-1}
   FLINK_PROPERTIES: |
     jobmanager.rpc.address: jobmanager
     taskmanager.numberOfTaskSlots: 1
@@ -111,8 +114,9 @@ services:
       # 1 partition: the Iggy Flink connector has one watermark per reader, not per partition; with more
       # partitions about half the events arrive late (MEASUREMENTS.md). Only one reader is active anyway.
       IGGY_PARTITIONS: ${IGGY_PARTITIONS:-1}
-      # 1 partition: the connector's sink writes round-robin only, so more partitions could reorder a
-      # symbol's advisories. Advisories are few (~11k-26k per week).
+      # 1 partition: the connector's sink picks one partition per batch (round-robin, or from the batch's first
+      # message), so with more partitions a symbol's advisories could be spread and read out of order.
+      # Advisories are few (~11k per week).
       IGGY_ADVISORIES_PARTITIONS: ${IGGY_ADVISORIES_PARTITIONS:-1}
     depends_on: [iggy]
 

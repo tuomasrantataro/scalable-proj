@@ -13,6 +13,7 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.util.OutputTag;
+import org.apache.iggy.connector.flink.sink.IggySink;
 import scalable.flink.Reporter;
 
 import java.sql.Types;
@@ -23,6 +24,7 @@ import java.time.ZoneOffset;
 import java.util.concurrent.atomic.LongAdder;
 
 import static scalable.flink.ConnectorTestJob.envOr;
+import static scalable.flink.ConnectorTestJob.iggyConnection;
 import static scalable.flink.ConnectorTestJob.source;
 
 /**
@@ -35,11 +37,16 @@ import static scalable.flink.ConnectorTestJob.source;
  *     → keyBy(symbol) → 5-min tumbling event-time window: close, ticks     │
  *         └─(late events)─────────────────────────────────────────────────┤
  *     → keyBy(symbol) → EmaFunction (keyed EmaState) ──(price jumps)───────┤
- *     → JdbcSink: ema_window (upsert on symbol, window_end)                 → JdbcSink: data_issue
+ *     ├→ JdbcSink: ema_window (upsert on symbol, window_end)                → JdbcSink: data_issue
+ *     └→ advisories only (BUY/SELL) → IggySink: topic `advisories` (JSON, one message per advisory)
  * </pre>
  *
+ * Advisory delivery is at-least-once: the Iggy sink flushes at checkpoints, so after a failure some advisories
+ * can be sent again. (symbol, window_end) identifies an advisory, so consumers can drop repeats.
+ *
  * Settings (env): OUT_OF_ORDERNESS_S (60), IDLENESS_S (10, 0 = off), SKEW_REPORT_S (3600),
- * PRICE_JUMP_REPORT (0.10), JDBC_URL / JDBC_USER / JDBC_PASSWORD, JDBC_BATCH_SIZE (1000).
+ * PRICE_JUMP_REPORT (0.10), JDBC_URL / JDBC_USER / JDBC_PASSWORD, JDBC_BATCH_SIZE (1000),
+ * IGGY_STREAM, IGGY_ADVISORIES_TOPIC (advisories), IGGY_ADVISORY_BATCH (1).
  */
 public final class EmaPipeline {
 
@@ -120,6 +127,21 @@ public final class EmaPipeline {
             ps.setBoolean(13, r.initial);
             ps.setObject(14, ts(r.emittedAt));
         })).name("timescaledb-ema");
+
+        // Query 2 output (FR-15, FR-16): each advisory is sent as soon as its window is evaluated. The connector
+        // flushes a batch only when it is full, or at a checkpoint (its time-based flush is checked only on the
+        // next write), so with batches an advisory could wait for the next checkpoint: batch size 1 by default.
+        // The topic has one partition: the sink picks the partition per batch, not per message.
+        emas.filter(r -> r.advisory != null).name("advisories-only")
+                .sinkTo(IggySink.<EmaWindow>builder()
+                        .setConnectionConfig(iggyConnection())
+                        .setStreamId(envOr("IGGY_STREAM", "trading"))
+                        .setTopicId(envOr("IGGY_ADVISORIES_TOPIC", "advisories"))
+                        .setSerializer(new AdvisorySerializer())
+                        .setBatchSize(Integer.parseInt(envOr("IGGY_ADVISORY_BATCH", "1")))
+                        .withBalancedPartitioning()
+                        .build())
+                .name("iggy-advisories");
 
         issues.sinkTo(jdbcSink(INSERT_ISSUE, (ps, i) -> {
             ps.setString(1, i.reason);
