@@ -22,7 +22,7 @@ IggySource → parse price rows → watermarks (OUT_OF_ORDERNESS_S, IDLENESS_S)
   → keyBy(symbol) → 5-min event-time window: close = latest event time ── late events ──┤
   → keyBy(symbol) → EMA function: EMA38, EMA100, BUY/SELL (keyed state) ── price jumps ──┤
   ├→ TimescaleDB ema_window (upsert)                           TimescaleDB data_issue ◄─┘
-  └→ BUY/SELL only → Iggy topic `advisories` (one JSON message per advisory, at-least-once)
+  └→ BUY/SELL only → subscription filter → Iggy topic `advisories` (one JSON message per trader and advisory)
 ```
 
 Connector test pipelines: `full` (source → per-node counter → keyBy counter, plus a verifier for lost or
@@ -56,6 +56,11 @@ docker compose exec iggy iggy -u iggy -p iggy --tcp-server-address 127.0.0.1:809
     message poll --offset 0 -m 5 trading advisories 0                     # first advisories from the topic
 ```
 
+Advisories are delivered per simulated trader, from [`config/subscriptions.txt`](config/subscriptions.txt)
+(`trader: SYMBOL SYMBOL ...` or `trader: *`), read when the job starts. To change it, edit the file and restart
+the job (`docker compose up -d --force-recreate jobmanager taskmanager`). Note: this starts a new job, so the
+EMA state starts from 0 again (no savepoint restore yet). EMAs are still computed and stored for every symbol.
+
 Flink unit tests run in the image build (`docker compose build jobmanager`).
 
 Benchmarks (they wipe Iggy; results in [MEASUREMENTS.md](MEASUREMENTS.md)):
@@ -67,7 +72,8 @@ python3 bench/jdbc_sink_test.py --partitions 1 --data-dir ./data --csv <day>.csv
 
 Options are set with env vars: `IGGY_PARTITIONS` (default 1; the connector has one watermark per reader, so more partitions make events late), `REPEAT`, `RATE`, `DATA_DIR` (default `./docs`),
 `CHECKPOINT_INTERVAL` (default `10 s`), and for `PIPELINE=ema`: `OUT_OF_ORDERNESS_S` (60), `IDLENESS_S` (10),
-`SKEW_REPORT_S` (3600) and `PRICE_JUMP_REPORT` (0.10) for the data quality report.
+`SKEW_REPORT_S` (3600) and `PRICE_JUMP_REPORT` (0.10) for the data quality report, `SUBSCRIPTIONS_FILE`
+(`/config/subscriptions.txt`) and `IGGY_ADVISORY_BATCH` (1).
 
 ## Findings (2026-11-16)
 

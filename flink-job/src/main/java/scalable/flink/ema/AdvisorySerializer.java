@@ -9,25 +9,28 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Advisory ({@link EmaWindow} with a BUY/SELL) → one JSON message for the Iggy topic `advisories`:
+ * Advisory for one trader ({@link TraderAdvisory}) → one JSON message for the Iggy topic `advisories`:
  *
  * <pre>
- * {"symbol":"ASML.NL","type":"BUY","window_start":"2021-11-10T09:30:00","window_end":"2021-11-10T09:35:00",
+ * {"trader":"trader-tech","symbol":"ASML.NL","type":"BUY","window_start":"2021-11-10T09:30:00","window_end":"2021-11-10T09:35:00",
  *  "due_at":"2021-11-10T09:35:00","close":712.3,"ema38":711.9,"ema100":711.8,"prev_ema38":711.8,
  *  "prev_ema100":711.8,"initial":false,"emitted_at":"2026-11-19T18:22:31.123Z"}
  * </pre>
  *
  * Market times are local exchange time without a zone (as in the data); `emitted_at` is a UTC instant.
- * (symbol, window_end) identifies an advisory: delivery is at-least-once, so consumers deduplicate on it.
+ * (trader, symbol, window_end) identifies a message: delivery is at-least-once, so consumers deduplicate on it.
  * Written by hand (fixed fields) to avoid depending on the connector's Jackson version.
  */
-public class AdvisorySerializer implements SerializationSchema<EmaWindow> {
+public class AdvisorySerializer implements SerializationSchema<TraderAdvisory> {
     private static final long serialVersionUID = 1L;
 
     @Override
-    public byte[] serialize(EmaWindow r) {
-        StringBuilder sb = new StringBuilder(320);
-        sb.append("{\"symbol\":");
+    public byte[] serialize(TraderAdvisory ta) {
+        EmaWindow r = ta.advisory;
+        StringBuilder sb = new StringBuilder(352);
+        sb.append("{\"trader\":");
+        string(sb, ta.trader);
+        sb.append(",\"symbol\":");
         string(sb, r.symbol);
         sb.append(",\"type\":");
         string(sb, r.advisory);

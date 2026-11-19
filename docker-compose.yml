@@ -32,6 +32,8 @@ x-flink-env: &flink-env
   # Advisories per Iggy send. 1 = each advisory is sent as soon as it is computed; with larger batches the
   # connector holds a partial batch until the next checkpoint (up to CHECKPOINT_INTERVAL).
   IGGY_ADVISORY_BATCH: ${IGGY_ADVISORY_BATCH:-1}
+  # Per-trader advisory subscriptions (FR-4), read by the job at start (JobManager). Format: config/subscriptions.txt
+  SUBSCRIPTIONS_FILE: ${SUBSCRIPTIONS_FILE:-/config/subscriptions.txt}
   FLINK_PROPERTIES: |
     jobmanager.rpc.address: jobmanager
     taskmanager.numberOfTaskSlots: 1
@@ -129,6 +131,7 @@ services:
     environment: *flink-env
     volumes:
       - flink-checkpoints:/flink-checkpoints
+      - ./config:/config:ro    # subscriptions.txt
     depends_on:
       iggy-setup: { condition: service_completed_successfully }
       db-setup: { condition: service_completed_successfully }

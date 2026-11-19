@@ -14,8 +14,12 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.util.OutputTag;
 import org.apache.iggy.connector.flink.sink.IggySink;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import scalable.flink.Reporter;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.sql.Types;
 import java.time.Duration;
 import java.time.Instant;
@@ -38,17 +42,23 @@ import static scalable.flink.ConnectorTestJob.source;
  *         └─(late events)─────────────────────────────────────────────────┤
  *     → keyBy(symbol) → EmaFunction (keyed EmaState) ──(price jumps)───────┤
  *     ├→ JdbcSink: ema_window (upsert on symbol, window_end)                → JdbcSink: data_issue
- *     └→ advisories only (BUY/SELL) → IggySink: topic `advisories` (JSON, one message per advisory)
+ *     └→ advisories only (BUY/SELL) → SubscriptionFilter: one copy per subscribed trader
+ *          → IggySink: topic `advisories` (JSON, one message per trader and advisory)
  * </pre>
  *
+ * Subscriptions (FR-4) come from SUBSCRIPTIONS_FILE (default /config/subscriptions.txt), read once at job
+ * start; see {@link Subscriptions}. EMAs and the ema_window table still cover every symbol (FR-3).
+ *
  * Advisory delivery is at-least-once: the Iggy sink flushes at checkpoints, so after a failure some advisories
- * can be sent again. (symbol, window_end) identifies an advisory, so consumers can drop repeats.
+ * can be sent again. (trader, symbol, window_end) identifies a message, so consumers can drop repeats.
  *
  * Settings (env): OUT_OF_ORDERNESS_S (60), IDLENESS_S (10, 0 = off), SKEW_REPORT_S (3600),
  * PRICE_JUMP_REPORT (0.10), JDBC_URL / JDBC_USER / JDBC_PASSWORD, JDBC_BATCH_SIZE (1000),
- * IGGY_STREAM, IGGY_ADVISORIES_TOPIC (advisories), IGGY_ADVISORY_BATCH (1).
+ * IGGY_STREAM, IGGY_ADVISORIES_TOPIC (advisories), IGGY_ADVISORY_BATCH (1), SUBSCRIPTIONS_FILE.
  */
 public final class EmaPipeline {
+
+    private static final Logger LOG = LoggerFactory.getLogger(EmaPipeline.class);
 
     static final OutputTag<MarketEvent> LATE = new OutputTag<>("late", TypeInformation.of(MarketEvent.class));
 
@@ -72,7 +82,13 @@ public final class EmaPipeline {
 
     private EmaPipeline() {}
 
-    public static void build(StreamExecutionEnvironment env) {
+    public static void build(StreamExecutionEnvironment env) throws IOException {
+        Path subscriptionsFile = Path.of(envOr("SUBSCRIPTIONS_FILE", "/config/subscriptions.txt"));
+        Subscriptions subscriptions = Subscriptions.load(subscriptionsFile);
+        LOG.info("subscriptions from {}: {}", subscriptionsFile, subscriptions);
+        if (subscriptions.subscriptionCount() == 0) {
+            LOG.warn("no subscriptions in {}: no advisories will be delivered", subscriptionsFile);
+        }
         long outOfOrdernessS = Long.parseLong(envOr("OUT_OF_ORDERNESS_S", "60"));
         long idlenessS = Long.parseLong(envOr("IDLENESS_S", "10"));
         long skewS = Long.parseLong(envOr("SKEW_REPORT_S", "3600"));
@@ -133,7 +149,8 @@ public final class EmaPipeline {
         // next write), so with batches an advisory could wait for the next checkpoint: batch size 1 by default.
         // The topic has one partition: the sink picks the partition per batch, not per message.
         emas.filter(r -> r.advisory != null).name("advisories-only")
-                .sinkTo(IggySink.<EmaWindow>builder()
+                .flatMap(new SubscriptionFilter(subscriptions)).name("subscriptions")
+                .sinkTo(IggySink.<TraderAdvisory>builder()
                         .setConnectionConfig(iggyConnection())
                         .setStreamId(envOr("IGGY_STREAM", "trading"))
                         .setTopicId(envOr("IGGY_ADVISORIES_TOPIC", "advisories"))

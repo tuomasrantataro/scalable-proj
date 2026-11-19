@@ -22,8 +22,9 @@ class AdvisorySerializerTest {
         r.prevEma100 = 711.7;
         r.initial = false;
         r.emittedAt = 1_795_111_225_751L;
-        String json = new String(new AdvisorySerializer().serialize(r), StandardCharsets.UTF_8);
-        assertEquals("{\"symbol\":\"ASML.NL\",\"type\":\"SELL\",\"window_start\":\"2021-11-10T09:30:00\","
+        String json = new String(new AdvisorySerializer().serialize(new TraderAdvisory("trader-tech", r)),
+                StandardCharsets.UTF_8);
+        assertEquals("{\"trader\":\"trader-tech\",\"symbol\":\"ASML.NL\",\"type\":\"SELL\",\"window_start\":\"2021-11-10T09:30:00\","
                 + "\"window_end\":\"2021-11-10T09:35:00\",\"due_at\":\"2021-11-10T09:35:00\",\"close\":712.3,"
                 + "\"ema38\":711.5,\"ema100\":711.75,\"prev_ema38\":711.8,\"prev_ema100\":711.7,\"initial\":false,"
                 + "\"emitted_at\":\"2026-11-19T18:00:25.751Z\"}", json);

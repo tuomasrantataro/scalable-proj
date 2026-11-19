@@ -1,0 +1,13 @@
+# Advisory subscriptions (FR-4): which simulated traders receive BUY/SELL advisories for which symbols.
+# EMAs and advisories are computed for every symbol; only delivery to the Iggy topic `advisories` is filtered,
+# one message per (trader, advisory). Read once when the Flink job starts: edit, then restart the job.
+#
+# Format: trader: SYMBOL SYMBOL, SYMBOL ...   (commas and/or spaces; a trader may span several lines)
+#         trader: *                           (every symbol)
+# Symbols include the exchange: .FR Paris, .NL Amsterdam, .ETR Xetra (Xetra symbols are WKNs, e.g. SAP = 716460.ETR).
+
+trader-paris:     TTE.FR MC.FR AIR.FR ALNEV.FR      # Paris equities, incl. an illiquid one (ALNEV.FR)
+trader-amsterdam: ASML.NL INGA.NL
+trader-xetra:     623100.ETR 716460.ETR A2PBHR.ETR  # Infineon, SAP, a sparse equity
+trader-indices:   PX1.FR AEX.NL A169S8.ETR EUS5P.NL IECRP.FR
+trader-tech:      ASML.NL 623100.ETR 716460.ETR     # overlaps with the exchange traders

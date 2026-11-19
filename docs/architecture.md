@@ -20,7 +20,7 @@ Throughput numbers: [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 | Result storage | **TimescaleDB 2.31 (PostgreSQL 17)**, written by the Flink JDBC sink (`flink-connector-jdbc-core:4.1.0-2.2` + PostgreSQL driver 42.7.12) with `INSERT … ON CONFLICT (symbol, window_end) DO UPDATE` | Exact, idempotent upserts on a real primary key, so replays after a restart are harmless. Plain SQL for the pandas correctness comparison, and a built-in Grafana data source. Tested on Flink 2.3 (no build for 2.3 exists yet): identical results across runs, idempotent re-runs, and re-emitted windows absorbed after failover ([`MEASUREMENTS.md`](../MEASUREMENTS.md)). Rejected: InfluxDB (no maintained Flink connector, awkward for relational checks) and ClickHouse (upserts only eventually deduplicated; its scale is not needed: at most ~1.6M rows/day). |
 | Reference implementation | **Python + pandas batch script** ([`reference/`](../reference/README.md)), pyarrow for reading the CSV files, matplotlib for figures | Written from the requirements alone, not from the Flink code, so it can find errors in it (NFR-9). Whole week in ~2.5 min on 4 cores. EMAs evaluated in the same order as FR-11, so values can be compared exactly. Checked against unit tests and an independent `pandas.ewm` computation (identical). It models the stream's late-event rule (watermark = max event time − D), so its advisories are what a correct stream must emit. |
 | Flink state backend | **HashMap (heap)**, `state.backend.type: hashmap` in `docker-compose.yml`, with file-system checkpoint storage on the shared volume | State is small: per symbol a few doubles (EMAs, previous EMAs) plus the open 5-min window, for about 5,500 symbols, so it fits easily on the TaskManager heap, and heap access avoids RocksDB's serialization on every read and write. Explicit even though it is Flink 2.3's default, so the choice is visible and easy to switch. Verified: the job reports `HashMapStateBackend` with `FileSystemCheckpointStorage` (REST `/jobs/<id>/checkpoints/config`), and checkpoints complete. Rejected: RocksDB (needed only when state exceeds memory, or for incremental checkpoints of large state). |
-| Advisory delivery | **Iggy topic `advisories`** (1 partition, created by `iggy-setup`), written by the connector's `IggySink` with a hand-written JSON serializer: one message per advisory, batch size 1 (`IGGY_ADVISORY_BATCH`) | Advisories must be emitted immediately (FR-15/16, NFR-3). The sink sends a batch only when it is full or at a checkpoint (its 5 s time flush is checked only on the next write), so a larger batch could hold an advisory for up to a checkpoint interval; advisories are few (~11k per week), so sending each one is cheap. One partition because the sink picks one partition per batch (round-robin, or from the first message's key), not per message. Delivery is at-least-once (flush at checkpoints); (symbol, window_end) identifies an advisory, so consumers can drop repeats. Verified on the full week: the topic holds exactly the 11,349 advisories of `ema_window`, no duplicates, identical fields, each symbol in window order; `emitted_at` → stored in Iggy p50 0.8 ms, p99 1.7 ms. | Custom Iggy sink that partitions per message by symbol, if consumers ever need several partitions |
+| Advisory delivery | **Iggy topic `advisories`** (1 partition, created by `iggy-setup`), written by the connector's `IggySink` with a hand-written JSON serializer: one message per subscribed trader and advisory (per-trader lists in `config/subscriptions.txt`, §3.6), batch size 1 (`IGGY_ADVISORY_BATCH`) | Advisories must be emitted immediately (FR-15/16, NFR-3). The sink sends a batch only when it is full or at a checkpoint (its 5 s time flush is checked only on the next write), so a larger batch could hold an advisory for up to a checkpoint interval; advisories are few (~11k per week), so sending each one is cheap. One partition because the sink picks one partition per batch (round-robin, or from the first message's key), not per message. Delivery is at-least-once (flush at checkpoints); (symbol, window_end) identifies an advisory, so consumers can drop repeats. Verified on the full week: the topic holds exactly the 11,349 advisories of `ema_window`, no duplicates, identical fields, each symbol in window order; `emitted_at` → stored in Iggy p50 0.8 ms, p99 1.7 ms. | Custom Iggy sink that partitions per message by symbol, if consumers ever need several partitions |
 
 ### 1.2 Proposed (not yet decided)
 | Concern | Proposal | Alternatives |
@@ -56,7 +56,7 @@ Throughput numbers: [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 | `iggy` | Stream `trading`, with topics `ticks` (input, N partitions, **1 by default** while using the connector, see §3.4), `advisories` (output, 1 partition, see §1.2) and `subscriptions` (control). Iggy 0.10 needs explicit container settings: bind addresses `0.0.0.0` (the default is loopback), an explicit shard count (`IGGY_SHARDING_CPU_ALLOCATION`; the default NUMA-aware allocation fails inside Docker), and core pinning off. |
 | `flink-jobmanager` | Runs the job in **standalone application mode**. |
 | `flink-taskmanager` | Workers. Replicated with `--scale taskmanager=k`. |
-| `timescaledb` | Stores EMA results and advisories (`ema_window`, view `advisories`) and the data quality report (`data_issue`, view `data_issue_summary`), for the visualization and correctness checks. Schema: [`config/timescaledb/init.sql`](../config/timescaledb/init.sql). *All symbols are stored for now (no subscription filter yet).* |
+| `timescaledb` | Stores EMA results and advisories (`ema_window`, view `advisories`) and the data quality report (`data_issue`, view `data_issue_summary`), for the visualization and correctness checks. Schema: [`config/timescaledb/init.sql`](../config/timescaledb/init.sql). All symbols are stored (FR-3), also for correctness checks; the subscription filter applies to advisory delivery only (§3.6). |
 | `db-setup` | One-shot job: applies the idempotent schema, so new tables also reach an existing database volume (the image's init scripts run only on an empty volume). |
 | `grafana` | Dashboards for the query results (smart visualization) and system metrics. |
 | `prometheus`, `cadvisor` | Collect throughput, latency, backpressure and resource metrics. |
@@ -84,9 +84,9 @@ IggySource (official connector, one split per partition; in practice one active 
   → TumblingEventTimeWindows(5 min)  ── aggregate: last price by event time (Close), tick count
   │                                     late events → data_issue
   → KeyedProcessFunction (EMA38, EMA100, crossover detection; keyed state) ── price jumps → data_issue
-  → connect with broadcast(subscriptions)  ── filter to subscribed symbols          (not built yet)
-  ├─► JDBC sink → TimescaleDB (EMA per window incl. advisories; data issues)
-  └─► advisories only → Iggy sink → topic `advisories` (JSON, one message per advisory)
+  ├─► JDBC sink → TimescaleDB (EMA per window incl. advisories, all symbols; data issues)
+  └─► advisories only → subscription filter: one copy per subscribed trader (§3.6)
+        → Iggy sink → topic `advisories` (JSON, one message per trader and advisory)
 ```
 *Implemented as `PIPELINE=ema` ([`flink-job/src/main/java/scalable/flink/ema/`](../flink-job/src/main/java/scalable/flink/ema/), the default in `docker-compose.yml`). Full week (289 M rows, 59.4 M usable price events) in about 6 min on one laptop, with the producer running at the same time.*
 
@@ -126,14 +126,17 @@ if ema38 < ema100 and prevEma38 >= prevEma100 → SELL
 - The state survives day boundaries and is included in checkpoints.
 
 ### 3.6 Subscriptions (FR-3, FR-4)
-- EMAs are computed for **all** symbols. Only output for subscribed symbols is emitted.
-- The initial subscription list is loaded from a config file. Changes are published to Iggy topic `subscriptions` and distributed to all Flink tasks as **broadcast state**.
+- EMAs and advisories are computed for **all** symbols (and all are stored in `ema_window`). Only advisory delivery to the Iggy topic `advisories` is filtered.
+- **Per-trader lists in a config file (decision).** [`config/subscriptions.txt`](../config/subscriptions.txt): one line per simulated trader, `trader: SYMBOL SYMBOL, ...`, or `trader: *` for every symbol. The job reads it once at start (`SUBSCRIPTIONS_FILE`, mounted read-only into the JobManager) and ships a symbol → traders map with the job graph. Each advisory is sent once per subscribed trader, with a `trader` field; a symbol nobody subscribes to sends nothing. Malformed lines stop the job with the file and line number. Changing subscriptions = edit the file and restart the job. *Caveat: recreating the JobManager starts a new job; checkpoints are not retained and there is no HA, so the EMA state starts again from 0 while Iggy resumes after the last committed offset. To keep the state, stop the job with a savepoint and start the new one from it (not yet scripted).*
+- Why not the Iggy `subscriptions` topic with broadcast state (the earlier plan): the course project and the evaluation criteria ask for updates only for a subscribed subset and for "more subscribers" as a scalability dimension, but nothing asks for runtime changes. With the connector, an idle subscriptions reader busy-polls about one core all the time (§4.1), which would also distort the CPU measurements, and a fresh deployment would skip earlier changes because offsets are committed on poll. A runtime topic can still be added later on top of the file.
+- *Verified on the full week with the default file (5 traders, 17 subscriptions, 14 symbols): of 11,349 advisories, 61 were for subscribed symbols and became exactly the 73 expected messages (overlapping traders), with identical fields and no duplicates.*
+- Scalability experiments: vary the number of traders and symbols per trader (generated files, `SUBSCRIPTIONS_FILE`).
 
 ### 3.7 Output records
 | Record | Fields |
 |---|---|
 | EMA result (`ema_window`) | symbol, sec_type, window_start, window_end, close, close_time, ticks, ema38, ema100, prev_ema38, prev_ema100, advisory (BUY/SELL/null), initial, emitted_at. *Planned: ingestion_ts of the closing event, once the producer stamps it.* |
-| Advisory (view `advisories`; Iggy topic `advisories` as JSON) | symbol, type (BUY/SELL), window_start, window_end, due_at (= window_end, FR-8), close, ema38, ema100, prev_ema38, prev_ema100, initial, emitted_at. In the JSON message, market times are local exchange time without a zone (`"2021-11-10T09:35:00"`) and `emitted_at` is a UTC instant. |
+| Advisory (view `advisories`; Iggy topic `advisories` as JSON, plus `trader` in the message) | symbol, type (BUY/SELL), window_start, window_end, due_at (= window_end, FR-8), close, ema38, ema100, prev_ema38, prev_ema100, initial, emitted_at. In the JSON message, market times are local exchange time without a zone (`"2021-11-10T09:35:00"`) and `emitted_at` is a UTC instant. |
 | Data issue (`data_issue`) | reason, symbol, event_time, price, iggy_partition, iggy_offset, detail |
 
 ### 3.8 Data quality report
@@ -205,10 +208,11 @@ flink-job/           Flink application: PIPELINE=ema (ema/: EMA, advisories, dat
 bench/               benchmark scripts (source_throughput.py)
 docs/                requirements, architecture, report; figures/reference/ (reference result plots)
 reference/           pandas reference implementation, unit tests, plots
+config/              subscriptions.txt (per-trader advisory subscriptions), timescaledb/init.sql (schema)
 data/                CSV files (git-ignored)
 
 planned:
-config/              subscriptions, Flink conf, Prometheus, Grafana provisioning
+config/              Flink conf, Prometheus, Grafana provisioning
 reference/           comparison script (Flink output in TimescaleDB vs reference)
 autoscaler/          (stretch) custom scaling controller
 ```
