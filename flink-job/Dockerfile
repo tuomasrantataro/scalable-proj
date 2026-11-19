@@ -3,7 +3,8 @@ WORKDIR /build
 COPY pom.xml .
 RUN mvn -q -B dependency:go-offline
 COPY src ./src
-RUN mvn -q -B package -DskipTests
+# Unit tests run here: an image is only built if they pass.
+RUN mvn -q -B package
 
 FROM flink:2.3.0-java17
 # The connector logs every polled message at INFO; keep it quiet so our counters are readable.

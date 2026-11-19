@@ -1,23 +1,31 @@
 # scalable-proj
 
-Minimal experiment for the Iggy → Flink connector with several Flink nodes
-(see [`docs/architecture.md`](docs/architecture.md)).
+Detecting trading trends in the DEBS 2022 tick data: Iggy → Flink → TimescaleDB
+(see [`docs/architecture.md`](docs/architecture.md)). The Flink job computes EMA38/EMA100 per symbol and
+5-minute window, BUY/SELL crossover advisories, and a report of suspicious input data.
 
 | Service | What it does |
 |---|---|
 | `iggy` | Apache Iggy 0.10.0 server (TCP 8090, HTTP 3000) |
 | `iggy-setup` | One-shot: creates stream `trading`, topic `ticks` (1 partition by default, see below), consumer group `flink`, and output topic `advisories` (1 partition, `IGGY_ADVISORIES_PARTITIONS`; not written to yet) |
-| `jobmanager` | Flink 2.3.0, standalone application mode, runs `scalable.flink.ConnectorTestJob` (UI: http://localhost:8081) |
+| `jobmanager` | Flink 2.3.0, standalone application mode, runs `scalable.flink.ConnectorTestJob`; `PIPELINE` picks the pipeline: `ema` (default), `full`, `count`, `jdbc` (UI: http://localhost:8081) |
 | `taskmanager` ×2 | 1 slot each, job parallelism 2 |
-| `timescaledb` | TimescaleDB 2.31 (PostgreSQL 17), table `window_close` ([schema](config/timescaledb/init.sql)). Written by `PIPELINE=jdbc` (5-min windows, upsert). |
+| `timescaledb` | TimescaleDB 2.31 (PostgreSQL 17), [schema](config/timescaledb/init.sql): `ema_window` + view `advisories`, `data_issue` + view `data_issue_summary` (`PIPELINE=ema`), `window_close` (`PIPELINE=jdbc`) |
+| `db-setup` | One-shot: applies the idempotent schema (also to an existing database volume) |
 | `replay-producer` | Sends CSV rows to `ticks`, partitioned by symbol ID (Rust, `producer-rs/`) |
 
-Job topology:
+Job topology, `PIPELINE=ema` ([code](flink-job/src/main/java/scalable/flink/ema/)):
 
 ```
-IggySource (p=2) → node-counter (p=2, chained) ─┬─ keyBy(symbol) → symbol-counter (p=2)
-                                                 └─ verifier (p=1): total / distinct / duplicates / gaps per partition
+IggySource → parse price rows → watermarks (OUT_OF_ORDERNESS_S, IDLENESS_S)
+  → quality gate ─────────────────────────────────────────────┐ zero prices: dropped, counted
+  → keyBy(symbol) → 5-min event-time window: close = latest event time ── late events ──┤
+  → keyBy(symbol) → EMA function: EMA38, EMA100, BUY/SELL (keyed state) ── price jumps ──┤
+  → TimescaleDB ema_window (upsert)                            TimescaleDB data_issue ◄─┘
 ```
+
+Connector test pipelines: `full` (source → per-node counter → keyBy counter, plus a verifier for lost or
+duplicated messages), `count` (source only), `jdbc` (5-min closes into `window_close`).
 
 Connector: `org.apache.iggy:flink-connector:0.10.0` (built against Flink 2.3.0).
 
@@ -33,6 +41,20 @@ RATE=1000 docker compose run --rm replay-producer             # rate-limited (ms
 docker compose down -v                                        # stop and wipe Iggy data
 ```
 
+Whole week through the EMA job (about 6 min; `IGGY_TOPIC` / `IGGY_CONSUMER_GROUP` select a fresh topic or group):
+
+```bash
+export DATA_DIR=./data IGGY_POLL_BATCH=5000
+docker compose up -d --build jobmanager taskmanager
+for d in 08 09 10 11 12 13 14; do
+  CSV_FILE=/data/debs2022-gc-trading-day-$d-11-21.csv docker compose run --rm --no-deps replay-producer
+done
+docker compose exec timescaledb psql -U postgres -d trading -c 'SELECT * FROM data_issue_summary'
+docker compose exec timescaledb psql -U postgres -d trading -c 'SELECT type, count(*) FROM advisories GROUP BY 1'
+```
+
+Flink unit tests run in the image build (`docker compose build jobmanager`).
+
 Benchmarks (they wipe Iggy; results in [MEASUREMENTS.md](MEASUREMENTS.md)):
 
 ```bash
@@ -41,7 +63,8 @@ python3 bench/jdbc_sink_test.py --partitions 1 --data-dir ./data --csv <day>.csv
 ```
 
 Options are set with env vars: `IGGY_PARTITIONS` (default 1; the connector has one watermark per reader, so more partitions make events late), `REPEAT`, `RATE`, `DATA_DIR` (default `./docs`),
-and `CHECKPOINT_INTERVAL` (default `10 s`).
+`CHECKPOINT_INTERVAL` (default `10 s`), and for `PIPELINE=ema`: `OUT_OF_ORDERNESS_S` (60), `IDLENESS_S` (10),
+`SKEW_REPORT_S` (3600) and `PRICE_JUMP_REPORT` (0.10) for the data quality report.
 
 ## Findings (2026-11-16)
 

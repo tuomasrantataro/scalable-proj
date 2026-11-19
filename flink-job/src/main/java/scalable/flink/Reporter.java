@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /** Logs a status line every few seconds, only when it changed. Runs on its own daemon thread. */
-final class Reporter {
+public final class Reporter {
     private static final Logger LOG = LoggerFactory.getLogger("scalable.report");
     private static final long INTERVAL_MS = Long.parseLong(ConnectorTestJob.envOr("REPORT_INTERVAL_MS", "5000"));
 
@@ -28,7 +28,7 @@ final class Reporter {
         exec.scheduleAtFixedRate(this::report, INTERVAL_MS, INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
-    static Reporter start(Supplier<String> status) {
+    public static Reporter start(Supplier<String> status) {
         return new Reporter(status);
     }
 
@@ -40,7 +40,7 @@ final class Reporter {
         }
     }
 
-    void stop() {
+    public void stop() {
         exec.shutdownNow();
         report();
     }

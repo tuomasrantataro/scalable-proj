@@ -9,6 +9,7 @@ import org.apache.iggy.connector.config.IggyConnectionConfig;
 import org.apache.iggy.connector.config.OffsetConfig;
 import org.apache.iggy.connector.flink.source.IggySource;
 import org.apache.iggy.connector.serialization.DeserializationSchema;
+import scalable.flink.ema.EmaPipeline;
 
 /**
  * Connector smoke test: Iggy source (parallel) → per-node counter → keyBy(symbol) per-node counter,
@@ -27,6 +28,13 @@ public final class ConnectorTestJob {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
         String pipeline = envOr("PIPELINE", "full");
+
+        // PIPELINE=ema: EMA38/EMA100 per 5-min window, crossover advisories, data quality report (TimescaleDB).
+        if ("ema".equals(pipeline)) {
+            EmaPipeline.build(env);
+            env.execute("trading-trends-ema");
+            return;
+        }
 
         // PIPELINE=jdbc: price events -> 5-min windows -> TimescaleDB via the Flink JDBC connector.
         if ("jdbc".equals(pipeline)) {
@@ -56,7 +64,7 @@ public final class ConnectorTestJob {
         env.execute("iggy-connector-test");
     }
 
-    static <T> IggySource<T> source(DeserializationSchema<T> deserializer) {
+    public static <T> IggySource<T> source(DeserializationSchema<T> deserializer) {
         return IggySource.<T>builder()
                 .setConnectionConfig(IggyConnectionConfig.builder()
                         .serverAddress(envOr("IGGY_ADDRESS", "iggy:8090"))
@@ -74,7 +82,7 @@ public final class ConnectorTestJob {
                 .build();
     }
 
-    static String envOr(String key, String def) {
+    public static String envOr(String key, String def) {
         String v = System.getenv(key);
         return v == null || v.isBlank() ? def : v;
     }
