@@ -9,7 +9,7 @@ Phases (all on the same Iggy backlog, each with its own consumer group so it rea
   D  no idleness  fresh table, IDLENESS_S=0 -> expect no windows (idle reader holds back the watermark)
 
 Usage (repo root; wipes Iggy and TimescaleDB):
-  python3 bench/jdbc_sink_test.py --data-dir ./data --csv <day>.csv [--producer-dir producer-rs]
+  python3 bench/jdbc_sink_test.py --data-dir ./data --csv <day>.csv
 """
 import argparse
 import json
@@ -107,11 +107,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default="./data")
     ap.add_argument("--csv", required=True)
-    ap.add_argument("--producer-dir", default="producer-rs")
     ap.add_argument("--partitions", default="1", help="partitions of topic ticks")
     ap.add_argument("--kill-after-rows", type=float, default=0.3, help="phase C: kill at this fraction of ref rows")
     a = ap.parse_args()
-    os.environ["PRODUCER_DIR"] = a.producer_dir
     os.environ["IGGY_PARTITIONS"] = a.partitions  # read by iggy-setup in docker-compose.yml
     print(f"== partitions: {a.partitions}")
 

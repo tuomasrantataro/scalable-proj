@@ -17,7 +17,7 @@ Is a single source reader fast enough, given that the connector gives every part
 | Iggy | 0.10.0, 2 shards, cores not pinned, 1 topic `ticks` with 4 partitions (source and producer benchmarks; the sink test and the current default use 1 partition) |
 | Flink | 2.3.0, 1 JobManager + 2 TaskManagers × 1 slot, parallelism 2, checkpoints every 10 s |
 | Active source readers | 1 in every run (connector behaviour, see README) |
-| Producer | `replay-producer`: one thread, 4000 rows per batch, one send call per partition. The partition is chosen by symbol hash. Two implementations: Java (`producer/`) and Rust (`producer-rs/`, a drop-in replacement with the same CLI, env vars and partitioning), chosen with `PRODUCER_DIR`. |
+| Producer | `replay-producer`: one thread, 4000 rows per batch, one send call per partition. The partition is chosen by symbol hash. Two implementations: Java (`producer/`) and Rust (`producer-rs/`, a drop-in replacement with the same CLI, env vars and partitioning), chosen with `PRODUCER_DIR`. *The Java producer, `PRODUCER_DIR` and `bench/producer_compare.sh` were removed on 2026-11-19; only the Rust producer remains. The Java results below are kept for reference.* |
 | Clock source | **HPET.** The kernel marked the TSC unstable at boot, so every clock read costs ~1.4 µs instead of ~20 ns. This matters for the producer comparison below. |
 | Message | One CSV row as UTF-8 text, about 87 B on average for the full-day file |
 
@@ -84,7 +84,7 @@ the three runs give three samples of the same reader measurement.
 
 ## Producer: Java vs Rust
 
-Script: [`bench/producer_compare.sh`](bench/producer_compare.sh). Producer alone, full trading day
+Script: `bench/producer_compare.sh` (removed with the Java producer on 2026-11-19; see git history). Producer alone, full trading day
 (53,994,554 rows), Flink stopped, a fresh Iggy for every run, and the two producers alternating for 3 rounds.
 The time is the producer's own measurement, from connect to the last send (no JVM or container startup).
 

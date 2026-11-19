@@ -3,7 +3,7 @@ name = "replay-producer"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
-description = "Rust drop-in replacement for producer/ (same env vars, modes and log lines)"
+description = "Replay producer and Iggy setup (stream, topics, consumer group)"
 publish = false
 
 [dependencies]

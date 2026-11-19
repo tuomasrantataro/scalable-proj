@@ -112,10 +112,7 @@ def main():
     ap.add_argument("--skip-live", action="store_true")
     ap.add_argument("--data-dir", default="./docs", help="host directory mounted at /data")
     ap.add_argument("--csv", default="pala.csv", help="file name inside --data-dir")
-    ap.add_argument("--producer-dir", default="producer", help="producer (Java) or producer-rs (Rust)")
     a = ap.parse_args()
-    os.environ["PRODUCER_DIR"] = a.producer_dir  # read by docker-compose.yml, inherited by sh()
-    print(f"== producer: {a.producer_dir}")
     sh("docker compose build iggy-setup")
     data_env = {"DATA_DIR": a.data_dir, "CSV_FILE": f"/data/{a.csv}"}
 
@@ -163,7 +160,7 @@ def main():
         time.sleep(3)
         v = [VERIFIER.search(l) for l in sh(f"docker compose logs --no-color --since {since} taskmanager").splitlines()]
         v = [m for m in v if m][-1]
-        print(f"   job consumed {total:,} msgs at {rate:,.0f} msg/s ({secs:.1f}s; producer took {prod_secs:.1f}s incl. JVM start)")
+        print(f"   job consumed {total:,} msgs at {rate:,.0f} msg/s ({secs:.1f}s; producer took {prod_secs:.1f}s incl. container start)")
         print(f"   verifier: total={v.group(1)} distinct={v.group(2)} duplicates={v.group(3)}; cpu={cpu}")
 
 

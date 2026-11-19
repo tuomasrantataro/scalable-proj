@@ -6,11 +6,11 @@ Minimal experiment for the Iggy → Flink connector with several Flink nodes
 | Service | What it does |
 |---|---|
 | `iggy` | Apache Iggy 0.10.0 server (TCP 8090, HTTP 3000) |
-| `iggy-setup` | One-shot: creates stream `trading`, topic `ticks` (1 partition by default, see below), consumer group `flink` |
+| `iggy-setup` | One-shot: creates stream `trading`, topic `ticks` (1 partition by default, see below), consumer group `flink`, and output topic `advisories` (1 partition, `IGGY_ADVISORIES_PARTITIONS`; not written to yet) |
 | `jobmanager` | Flink 2.3.0, standalone application mode, runs `scalable.flink.ConnectorTestJob` (UI: http://localhost:8081) |
 | `taskmanager` ×2 | 1 slot each, job parallelism 2 |
 | `timescaledb` | TimescaleDB 2.31 (PostgreSQL 17), table `window_close` ([schema](config/timescaledb/init.sql)). Written by `PIPELINE=jdbc` (5-min windows, upsert). |
-| `replay-producer` | Sends CSV rows to `ticks`, partitioned by symbol ID. Java (`producer/`, default) or Rust drop-in (`producer-rs/`): `PRODUCER_DIR=producer-rs docker compose ...` |
+| `replay-producer` | Sends CSV rows to `ticks`, partitioned by symbol ID (Rust, `producer-rs/`) |
 
 Job topology:
 
@@ -36,8 +36,7 @@ docker compose down -v                                        # stop and wipe Ig
 Benchmarks (they wipe Iggy; results in [MEASUREMENTS.md](MEASUREMENTS.md)):
 
 ```bash
-python3 bench/source_throughput.py --repeat 1 --data-dir ./data --csv <day>.csv [--producer-dir producer-rs]
-bench/producer_compare.sh 3                                   # Java vs Rust producer, 3 rounds
+python3 bench/source_throughput.py --repeat 1 --data-dir ./data --csv <day>.csv
 python3 bench/jdbc_sink_test.py --partitions 1 --data-dir ./data --csv <day>.csv   # JDBC sink → TimescaleDB
 ```
 

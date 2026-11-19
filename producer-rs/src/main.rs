@@ -1,9 +1,9 @@
-//! Rust drop-in replacement for the Java replay producer in `producer/`.
+//! Replay producer and Iggy setup.
 //!
-//! Same modes (`setup`, `replay`), same environment variables, same log lines, and the same
-//! partitioning (Java `String.hashCode()` of the symbol, floor-mod partition count), so a
-//! symbol lands in the same partition with either producer. The send loop is also the same:
-//! one thread, read `BATCH_SIZE` rows, then one synchronous send call per partition.
+//! Modes: `setup` (stream, topics, consumer group) and `replay` (send CSV rows). Partitioning: Java
+//! `String.hashCode()` of the symbol, floor-mod partition count; this keeps the partition assignment of the
+//! original Java producer (removed 2026-11-19), so MEASUREMENTS.md stays comparable. Send loop: one thread,
+//! read `BATCH_SIZE` rows, then one synchronous send call per partition.
 
 use std::collections::{BTreeMap, HashSet};
 use std::error::Error;
@@ -29,6 +29,9 @@ struct Config {
     topic: String,
     group: String,
     partitions: u32,
+    /// Output topic for BUY/SELL advisories (written by the Flink job), and its partition count.
+    advisories_topic: String,
+    advisories_partitions: u32,
     csv_file: String,
     repeat: u32,
     rate: u64,
@@ -50,6 +53,10 @@ impl Config {
             topic: env("IGGY_TOPIC", "ticks"),
             group: env("IGGY_CONSUMER_GROUP", "flink"),
             partitions: env("IGGY_PARTITIONS", "1").parse()?,
+            advisories_topic: env("IGGY_ADVISORIES_TOPIC", "advisories"),
+            // 1 by default: the connector's sink partitions round-robin only, so more partitions could
+            // reorder a symbol's advisories.
+            advisories_partitions: env("IGGY_ADVISORIES_PARTITIONS", "1").parse()?,
             csv_file: env("CSV_FILE", "/data/pala.csv"),
             repeat: env("REPEAT", "1").parse()?,
             rate: env("RATE", "0").parse()?,
@@ -127,21 +134,33 @@ async fn setup(client: &IggyClient, cfg: &Config) -> Res<()> {
         client.create_stream(&cfg.stream, &StreamCreateOptions::default()).await?;
         log!("created stream {}", cfg.stream);
     }
-    if !matches!(client.get_topic(&stream, &topic).await, Ok(Some(_))) {
-        let options = TopicCreateOptions {
-            partitions_count: Some(cfg.partitions),
-            ..Default::default()
-        };
-        client.create_topic(&stream, &cfg.topic, &options).await?;
-        log!("created topic {} with {} partitions", cfg.topic, cfg.partitions);
-    }
+    ensure_topic(client, &stream, &cfg.topic, cfg.partitions).await?;
     let group = Identifier::named(&cfg.group)?;
     if !matches!(client.get_consumer_group(&stream, &topic, &group).await, Ok(Some(_))) {
         client.create_consumer_group(&stream, &topic, &cfg.group).await?;
         log!("created consumer group {}", cfg.group);
     }
-    let details = client.get_topic(&stream, &topic).await?.ok_or("topic missing after setup")?;
-    log!("setup done: topic {} with {} partitions", details.name, details.partitions_count);
+    ensure_topic(client, &stream, &cfg.advisories_topic, cfg.advisories_partitions).await?;
+    for name in [&cfg.topic, &cfg.advisories_topic] {
+        let details = client
+            .get_topic(&stream, &Identifier::named(name)?)
+            .await?
+            .ok_or("topic missing after setup")?;
+        log!("setup done: topic {} with {} partitions", details.name, details.partitions_count);
+    }
+    Ok(())
+}
+
+/// Creates the topic if it does not exist. An existing topic is kept as is, even with another partition count.
+async fn ensure_topic(client: &IggyClient, stream: &Identifier, name: &str, partitions: u32) -> Res<()> {
+    if !matches!(client.get_topic(stream, &Identifier::named(name)?).await, Ok(Some(_))) {
+        let options = TopicCreateOptions {
+            partitions_count: Some(partitions),
+            ..Default::default()
+        };
+        client.create_topic(stream, name, &options).await?;
+        log!("created topic {} with {} partitions", name, partitions);
+    }
     Ok(())
 }
 
@@ -204,7 +223,7 @@ async fn replay(client: &IggyClient, cfg: &Config) -> Res<()> {
     Ok(())
 }
 
-/// One send call per partition, as in the Java producer.
+/// One send call per partition.
 async fn flush(
     client: &IggyClient,
     cfg: &Config,
@@ -251,7 +270,7 @@ async fn flush(
 }
 
 /// Java's `String.hashCode()` (s[0]*31^(n-1) + ... + s[n-1], wrapping i32, over UTF-16 units),
-/// so each symbol goes to the same partition as with the Java producer.
+/// so each symbol goes to the same partition as with the original Java producer.
 fn java_string_hash(bytes: &[u8]) -> i32 {
     String::from_utf8_lossy(bytes)
         .encode_utf16()
