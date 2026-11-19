@@ -1,0 +1,1584 @@
+{
+  "uid": "trading-trends",
+  "title": "Trading trends",
+  "description": "EMA38/EMA100 per 5-minute window and BUY/SELL advisories (Query 1 and 2), market overview and per symbol.",
+  "tags": [
+    "trading"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "",
+  "time": {
+    "from": "2021-11-08T06:00:00.000Z",
+    "to": "2021-11-13T00:00:00.000Z"
+  },
+  "fiscalYearStartMonth": 0,
+  "liveNow": false,
+  "timepicker": {},
+  "links": [
+    {
+      "title": "Dashboards",
+      "type": "dashboards",
+      "tags": [
+        "trading"
+      ],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": false,
+      "icon": "external link"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "custom",
+        "name": "exchange",
+        "label": "Exchange",
+        "description": "",
+        "query": "Paris : %.FR,Amsterdam : %.NL,Xetra : %.ETR",
+        "multi": true,
+        "includeAll": true,
+        "options": [
+          {
+            "text": "Paris",
+            "value": "%.FR",
+            "selected": false
+          },
+          {
+            "text": "Amsterdam",
+            "value": "%.NL",
+            "selected": false
+          },
+          {
+            "text": "Xetra",
+            "value": "%.ETR",
+            "selected": false
+          }
+        ],
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "type": "custom",
+        "name": "sec_type",
+        "label": "Type",
+        "description": "",
+        "query": "Equity : E,Index : I",
+        "multi": true,
+        "includeAll": true,
+        "options": [
+          {
+            "text": "Equity",
+            "value": "E",
+            "selected": false
+          },
+          {
+            "text": "Index",
+            "value": "I",
+            "selected": false
+          }
+        ],
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "type": "custom",
+        "name": "initial",
+        "label": "Initial advisories",
+        "description": "The first close of every symbol always gives BUY, since both previous EMAs are 0 (FR-12). Such advisories are flagged `initial`.",
+        "query": "hide,show",
+        "multi": false,
+        "includeAll": false,
+        "options": [
+          {
+            "text": "hide",
+            "value": "hide",
+            "selected": false
+          },
+          {
+            "text": "show",
+            "value": "show",
+            "selected": false
+          }
+        ],
+        "current": {
+          "text": "hide",
+          "value": "hide"
+        }
+      },
+      {
+        "type": "query",
+        "name": "symbol",
+        "label": "Symbol",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "timescaledb"
+        },
+        "definition": "symbols of the selected exchanges and types",
+        "query": "SELECT DISTINCT symbol FROM ema_window WHERE symbol LIKE ANY (ARRAY[$exchange]) AND sec_type IN ($sec_type) ORDER BY 1",
+        "refresh": 1,
+        "multi": false,
+        "includeAll": false,
+        "sort": 0,
+        "current": {
+          "text": "ASML.NL",
+          "value": "ASML.NL"
+        },
+        "description": "Symbol shown in the lower rows. Click a symbol in the advisory tables to select it."
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "name": "BUY ($symbol)",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "timescaledb"
+        },
+        "enable": true,
+        "iconColor": "#37872d",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            101,
+            102
+          ]
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT window_end AS time, '\u25b2 BUY' || CASE WHEN initial THEN ' (initial)' ELSE '' END || ' close ' || close AS text FROM ema_window WHERE symbol = '$symbol' AND advisory = 'BUY' AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      },
+      {
+        "name": "SELL ($symbol)",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "timescaledb"
+        },
+        "enable": true,
+        "iconColor": "#c4162a",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            101,
+            102
+          ]
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT window_end AS time, '\u25bc SELL close ' || close AS text FROM ema_window WHERE symbol = '$symbol' AND advisory = 'SELL' AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      },
+      {
+        "name": "EMA38 warm-up ($symbol)",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "timescaledb"
+        },
+        "enable": true,
+        "iconColor": "rgba(128,128,128,0.10)",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            101,
+            102,
+            103
+          ]
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "WITH s AS (SELECT window_start, window_end, row_number() OVER (ORDER BY window_end) AS n FROM ema_window WHERE symbol = '$symbol') SELECT min(window_start) AS time, max(window_end) AS \"timeEnd\", 'EMA38 warm-up: first 88 windows' AS text FROM s WHERE n <= 88",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      },
+      {
+        "name": "EMA100 warm-up ($symbol)",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "timescaledb"
+        },
+        "enable": true,
+        "iconColor": "rgba(128,128,128,0.10)",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            101,
+            102,
+            103
+          ]
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "WITH s AS (SELECT window_start, window_end, row_number() OVER (ORDER BY window_end) AS n FROM ema_window WHERE symbol = '$symbol') SELECT min(window_start) AS time, max(window_end) AS \"timeEnd\", 'EMA100 warm-up: first 231 windows' AS text FROM s WHERE n <= 231",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Market overview: advisories of all symbols (filtered by exchange and type)",
+      "id": 1,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "stat",
+      "title": "BUY advisories",
+      "id": 2,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "Bullish breakouts (FR-15) in the time range.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT count(*) AS \"BUY\" FROM ema_window WHERE advisory = 'BUY' AND symbol LIKE ANY (ARRAY[$exchange]) AND sec_type IN ($sec_type) AND (NOT initial OR '$initial' = 'show') AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#37872d"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "stat",
+      "title": "SELL advisories",
+      "id": 3,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "Bearish breakouts (FR-16) in the time range.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT count(*) AS \"SELL\" FROM ema_window WHERE advisory = 'SELL' AND symbol LIKE ANY (ARRAY[$exchange]) AND sec_type IN ($sec_type) AND (NOT initial OR '$initial' = 'show') AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#c4162a"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Symbols with advisories",
+      "id": 4,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT count(DISTINCT symbol) AS \"Symbols\" FROM ema_window WHERE advisory IS NOT NULL AND symbol LIKE ANY (ARRAY[$exchange]) AND sec_type IN ($sec_type) AND (NOT initial OR '$initial' = 'show') AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Windows evaluated",
+      "id": 5,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "Non-empty 5-minute windows (symbol \u00d7 window) with EMA results, for every symbol (FR-3).",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT count(*) AS \"Windows\" FROM ema_window WHERE symbol LIKE ANY (ARRAY[$exchange]) AND sec_type IN ($sec_type) AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "id": 6,
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "An advisory is an EMA38/EMA100 crossover in a 5-minute window, due at the window end (FR-8). Click a symbol to open it below. Times: exchange local time, shown as UTC. All symbols are shown; delivery to traders is filtered by `config/subscriptions.txt`."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Advisories per hour",
+      "id": 7,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "When crossovers cluster. BUY up, SELL down (counted negative). Many simultaneous advisories of one kind mean a market-wide move rather than symbol news.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT $__timeGroupAlias(window_end, '1h'), count(*) FILTER (WHERE advisory = 'BUY') AS \"BUY\", -count(*) FILTER (WHERE advisory = 'SELL') AS \"SELL\" FROM ema_window WHERE advisory IS NOT NULL AND symbol LIKE ANY (ARRAY[$exchange]) AND sec_type IN ($sec_type) AND (NOT initial OR '$initial' = 'show') AND $__timeFilter(window_end) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "barAlignment": 0,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "axisCenteredZero": true
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "BUY"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#37872d"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "SELL"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c4162a"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Most advisories (top 15 symbols)",
+      "id": 8,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "Symbols whose EMAs cross most often: either strongly trending reversals or whipsaw (a price oscillating around the EMAs). Click a bar to open the symbol.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT symbol, count(*) FILTER (WHERE advisory = 'BUY') AS \"BUY\", count(*) FILTER (WHERE advisory = 'SELL') AS \"SELL\" FROM ema_window WHERE advisory IS NOT NULL AND symbol LIKE ANY (ARRAY[$exchange]) AND sec_type IN ($sec_type) AND (NOT initial OR '$initial' = 'show') AND $__timeFilter(window_end) GROUP BY symbol ORDER BY count(*) DESC, symbol LIMIT 15",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "links": [
+            {
+              "title": "Show ${__data.fields.symbol}",
+              "url": "/d/trading-trends/trading-trends?${__url_time_range}&${exchange:queryparam}&${sec_type:queryparam}&${initial:queryparam}&var-symbol=${__data.fields.symbol}"
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "BUY"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#37872d"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "SELL"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c4162a"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "horizontal",
+        "stacking": "normal",
+        "showValue": "never",
+        "barWidth": 0.7,
+        "groupWidth": 0.7,
+        "xTickLabelSpacing": 0,
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "xField": "symbol"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Latest advisories",
+      "id": 9,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "Newest first, at most 500 (FR-18: symbol, type, window). Spread = (EMA38 \u2212 EMA100) / EMA100 just after the crossover. Click a symbol to open it.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT window_end AS \"Due at\", symbol AS \"Symbol\", advisory AS \"Type\", close AS \"Close\", ema38 AS \"EMA38\", ema100 AS \"EMA100\", round(((ema38 - ema100) / nullif(ema100, 0) * 100)::numeric, 4) AS \"Spread %\", initial AS \"Initial\", emitted_at AS \"Emitted (wall clock, UTC)\" FROM ema_window WHERE advisory IS NOT NULL AND symbol LIKE ANY (ARRAY[$exchange]) AND sec_type IN ($sec_type) AND (NOT initial OR '$initial' = 'show') AND $__timeFilter(window_end) ORDER BY window_end DESC, symbol LIMIT 500",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Type"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "BUY": {
+                        "color": "#37872d",
+                        "text": "\u25b2 BUY",
+                        "index": 0
+                      },
+                      "SELL": {
+                        "color": "#c4162a",
+                        "text": "\u25bc SELL",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Symbol"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Show ${__value.raw}",
+                    "url": "/d/trading-trends/trading-trends?${__url_time_range}&${exchange:queryparam}&${sec_type:queryparam}&${initial:queryparam}&var-symbol=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Due at"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "time:YYYY-MM-DD HH:mm"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Emitted (wall clock, UTC)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Symbol $symbol",
+      "id": 10,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Last close",
+      "id": 11,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "At the end of the time range.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT close AS \"Close\" FROM ema_window WHERE symbol = '$symbol' AND window_end <= $__timeTo() ORDER BY window_end DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "stat",
+      "title": "EMA38 / EMA100",
+      "id": 12,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "At the end of the time range.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 4,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT ema38 AS \"EMA38\", ema100 AS \"EMA100\" FROM ema_window WHERE symbol = '$symbol' AND window_end <= $__timeTo() ORDER BY window_end DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Trend",
+      "id": 13,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "EMA38 above EMA100 = bullish, below = bearish, at the end of the time range.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 10,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT CASE WHEN ema38 > ema100 THEN 1 WHEN ema38 < ema100 THEN -1 ELSE 0 END AS \"Trend\" FROM ema_window WHERE symbol = '$symbol' AND window_end <= $__timeTo() ORDER BY window_end DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#c4162a",
+                "value": null
+              },
+              {
+                "color": "#8f8f8f",
+                "value": 0
+              },
+              {
+                "color": "#37872d",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "\u25b2 Bullish"
+                },
+                "-1": {
+                  "text": "\u25bc Bearish"
+                },
+                "0": {
+                  "text": "Flat"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Advisories",
+      "id": 14,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 14,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT count(*) FILTER (WHERE advisory = 'BUY') AS \"BUY\", count(*) FILTER (WHERE advisory = 'SELL') AS \"SELL\" FROM ema_window WHERE symbol = '$symbol' AND advisory IS NOT NULL AND (NOT initial OR '$initial' = 'show') AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Windows / price events",
+      "id": 15,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "Non-empty 5-minute windows of the symbol and the price events in them.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT count(*) AS \"Windows\", sum(ticks) AS \"Price events\" FROM ema_window WHERE symbol = '$symbol' AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Close, EMA38, EMA100 \u2014 $symbol",
+      "id": 101,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "Close = last price of each 5-minute window (FR-10), plotted at the window end. Markers: \u25b2 BUY / \u25bc SELL advisories. Shaded: EMA warm-up, until the initial EMA = 0 (FR-12) weighs below 1% (88 windows for EMA38, 231 for EMA100). The y-axis follows the closes, so EMAs rising from 0 start below the chart. Lines break where the symbol has no window for more than 30 minutes (nights, weekend).",
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT window_end AS time, close AS \"Close\", ema38 AS \"EMA38\", ema100 AS \"EMA100\" FROM ema_window WHERE symbol = '$symbol' AND $__timeFilter(window_end) ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT min(close) AS min, max(close) AS max FROM ema_window WHERE symbol = '$symbol' AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "pointSize": 4,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "barAlignment": 0,
+            "insertNulls": 1800000
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Close"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8f8f8f"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.lineInterpolation",
+                "value": "stepBefore"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "EMA38"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3274d9"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "EMA100"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#ff9830"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "transformations": [
+        {
+          "id": "configFromData",
+          "options": {
+            "configRefId": "B",
+            "applyTo": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "mappings": [
+              {
+                "fieldName": "min",
+                "handlerKey": "min"
+              },
+              {
+                "fieldName": "max",
+                "handlerKey": "max"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "EMA spread \u2014 $symbol",
+      "id": 102,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "Above 0 = EMA38 over EMA100 (bullish), below = bearish. Each zero crossing is an advisory. The y-axis is scaled to the values after the EMA100 warm-up; during warm-up the spread runs off the top.",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT window_end AS time, (ema38 - ema100) / nullif(ema100, 0) * 100 AS \"(EMA38 \u2212 EMA100) / EMA100\" FROM ema_window WHERE symbol = '$symbol' AND $__timeFilter(window_end) ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "WITH s AS (SELECT (ema38 - ema100) / nullif(ema100, 0) * 100 AS v, row_number() OVER (ORDER BY window_end) AS n, window_end FROM ema_window WHERE symbol = '$symbol') SELECT -greatest(max(abs(v)), 0.01) * 1.1 AS min, greatest(max(abs(v)), 0.01) * 1.1 AS max FROM s WHERE n > 231 AND $__timeFilter(window_end)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 25,
+            "showPoints": "never",
+            "spanNulls": false,
+            "gradientMode": "scheme",
+            "axisCenteredZero": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "lineInterpolation": "linear",
+            "thresholdsStyle": {
+              "mode": "line"
+            },
+            "insertNulls": 1800000
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#c4162a",
+                "value": null
+              },
+              {
+                "color": "#37872d",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transformations": [
+        {
+          "id": "configFromData",
+          "options": {
+            "configRefId": "B",
+            "applyTo": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "mappings": [
+              {
+                "fieldName": "min",
+                "handlerKey": "min"
+              },
+              {
+                "fieldName": "max",
+                "handlerKey": "max"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Price events per window \u2014 $symbol",
+      "id": 103,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "Usable price events in each non-empty window (zero prices excluded). Windows without events are skipped: the EMAs are not updated (architecture \u00a73.5).",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 46
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT window_end AS time, ticks AS \"Price events\" FROM ema_window WHERE symbol = '$symbol' AND $__timeFilter(window_end) ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "barAlignment": 1,
+            "gradientMode": "none",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#86b6ef"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Advisories \u2014 $symbol",
+      "id": 16,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "description": "All advisories of the symbol, initial ones included.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 46
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT window_end AS \"Due at\", advisory AS \"Type\", close AS \"Close\", ema38 AS \"EMA38\", ema100 AS \"EMA100\", prev_ema38 AS \"Prev EMA38\", prev_ema100 AS \"Prev EMA100\", initial AS \"Initial\" FROM ema_window WHERE symbol = '$symbol' AND advisory IS NOT NULL AND $__timeFilter(window_end) ORDER BY window_end DESC",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Type"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "BUY": {
+                        "color": "#37872d",
+                        "text": "\u25b2 BUY",
+                        "index": 0
+                      },
+                      "SELL": {
+                        "color": "#c4162a",
+                        "text": "\u25bc SELL",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Due at"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "time:YYYY-MM-DD HH:mm"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    }
+  ]
+}

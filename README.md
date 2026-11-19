@@ -13,6 +13,8 @@ Detecting trading trends in the DEBS 2022 tick data: Iggy → Flink → Timescal
 | `timescaledb` | TimescaleDB 2.31 (PostgreSQL 17), [schema](config/timescaledb/init.sql): `ema_window` + view `advisories`, `data_issue` + view `data_issue_summary` (`PIPELINE=ema`), `window_close` (`PIPELINE=jdbc`) |
 | `db-setup` | One-shot: applies the idempotent schema (also to an existing database volume) |
 | `replay-producer` | Sends CSV rows to `ticks`, partitioned by symbol ID (Rust, `producer-rs/`) |
+| `grafana` | Dashboards at http://localhost:3001 (admin/admin; anonymous viewers allowed): Trading trends, Correctness and data quality, System metrics ([architecture §5.1](docs/architecture.md#51-grafana-dashboards)) |
+| `prometheus`, `cadvisor` | Metrics: Flink Prometheus reporter (port 9249 on every Flink container) and CPU/memory per container. Prometheus UI: http://localhost:9090 |
 
 Job topology, `PIPELINE=ema` ([code](flink-job/src/main/java/scalable/flink/ema/)):
 
@@ -60,6 +62,10 @@ Advisories are delivered per simulated trader, from [`config/subscriptions.txt`]
 (`trader: SYMBOL SYMBOL ...` or `trader: *`), read when the job starts. To change it, edit the file and restart
 the job (`docker compose up -d --force-recreate jobmanager taskmanager`). Note: this starts a new job, so the
 EMA state starts from 0 again (no savepoint restore yet). EMAs are still computed and stored for every symbol.
+
+Dashboards are provisioned from `config/grafana/` (data sources, and dashboards as JSON). Edits made in the UI
+are lost when Grafana restarts: export the dashboard JSON into `config/grafana/dashboards/` to keep them. The
+market dashboards show times in UTC, which is how local exchange time is stored, and default to the dataset's week.
 
 Flink unit tests run in the image build (`docker compose build jobmanager`).
 

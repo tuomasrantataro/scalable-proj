@@ -1,0 +1,27 @@
+# Scrapes the Flink Prometheus reporter (JobManager + every TaskManager replica) and cAdvisor.
+# Iggy's /metrics endpoint requires a login token in 0.10, so it is not scraped.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: flink-jobmanager
+    static_configs:
+      - targets: ["jobmanager:9249"]
+
+  # One target per replica: Docker's DNS returns every taskmanager container for the service name.
+  - job_name: flink-taskmanager
+    dns_sd_configs:
+      - names: ["taskmanager"]
+        type: A
+        port: 9249
+        refresh_interval: 10s
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    metric_relabel_configs:
+      # keep the compose containers only (cAdvisor also reports system cgroups); each service sets SERVICE=<name>
+      - source_labels: [container_env_SERVICE]
+        regex: .+
+        action: keep

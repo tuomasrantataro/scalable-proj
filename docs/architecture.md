@@ -20,13 +20,13 @@ Throughput numbers: [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 | Result storage | **TimescaleDB 2.31 (PostgreSQL 17)**, written by the Flink JDBC sink (`flink-connector-jdbc-core:4.1.0-2.2` + PostgreSQL driver 42.7.12) with `INSERT … ON CONFLICT (symbol, window_end) DO UPDATE` | Exact, idempotent upserts on a real primary key, so replays after a restart are harmless. Plain SQL for the pandas correctness comparison, and a built-in Grafana data source. Tested on Flink 2.3 (no build for 2.3 exists yet): identical results across runs, idempotent re-runs, and re-emitted windows absorbed after failover ([`MEASUREMENTS.md`](../MEASUREMENTS.md)). Rejected: InfluxDB (no maintained Flink connector, awkward for relational checks) and ClickHouse (upserts only eventually deduplicated; its scale is not needed: at most ~1.6M rows/day). |
 | Reference implementation | **Python + pandas batch script** ([`reference/`](../reference/README.md)), pyarrow for reading the CSV files, matplotlib for figures | Written from the requirements alone, not from the Flink code, so it can find errors in it (NFR-9). Whole week in ~2.5 min on 4 cores. EMAs evaluated in the same order as FR-11, so values can be compared exactly. Checked against unit tests and an independent `pandas.ewm` computation (identical). It models the stream's late-event rule (watermark = max event time − D), so its advisories are what a correct stream must emit. |
 | Flink state backend | **HashMap (heap)**, `state.backend.type: hashmap` in `docker-compose.yml`, with file-system checkpoint storage on the shared volume | State is small: per symbol a few doubles (EMAs, previous EMAs) plus the open 5-min window, for about 5,500 symbols, so it fits easily on the TaskManager heap, and heap access avoids RocksDB's serialization on every read and write. Explicit even though it is Flink 2.3's default, so the choice is visible and easy to switch. Verified: the job reports `HashMapStateBackend` with `FileSystemCheckpointStorage` (REST `/jobs/<id>/checkpoints/config`), and checkpoints complete. Rejected: RocksDB (needed only when state exceeds memory, or for incremental checkpoints of large state). |
+| Visualization and metrics | **Grafana 12.2** (provisioned from `config/grafana/`) over TimescaleDB and **Prometheus 3.7**, which scrapes the Flink Prometheus reporter (JobManager and every TaskManager, port 9249) and **cAdvisor 0.52** (CPU and memory per container). Three dashboards (§5.1) | Quick to build, no code, and the results are already in SQL. Grafana shows the market data at its stored local time by fixing the dashboard time zone to UTC. Limits: no push to the browser (refresh polling), and cross-symbol views are SQL over 1.9M rows, so heavy panels take seconds. Iggy is not scraped: its `/metrics` needs a login token in 0.10. cAdvisor reads containers through containerd, since Docker here uses the containerd image store, which its Docker handler cannot read; Compose labels are not visible there, so every service sets `SERVICE=<name>`. Network counters are not reported this way. | Custom web app (§1.2) |
 | Advisory delivery | **Iggy topic `advisories`** (1 partition, created by `iggy-setup`), written by the connector's `IggySink` with a hand-written JSON serializer: one message per subscribed trader and advisory (per-trader lists in `config/subscriptions.txt`, §3.6), batch size 1 (`IGGY_ADVISORY_BATCH`) | Advisories must be emitted immediately (FR-15/16, NFR-3). The sink sends a batch only when it is full or at a checkpoint (its 5 s time flush is checked only on the next write), so a larger batch could hold an advisory for up to a checkpoint interval; advisories are few (~11k per week), so sending each one is cheap. One partition because the sink picks one partition per batch (round-robin, or from the first message's key), not per message. Delivery is at-least-once (flush at checkpoints); (symbol, window_end) identifies an advisory, so consumers can drop repeats. Verified on the full week: the topic holds exactly the 11,349 advisories of `ema_window`, no duplicates, identical fields, each symbol in window order; `emitted_at` → stored in Iggy p50 0.8 ms, p99 1.7 ms. | Custom Iggy sink that partitions per message by symbol, if consumers ever need several partitions |
 
 ### 1.2 Proposed (not yet decided)
 | Concern | Proposal | Alternatives |
 |---|---|---|
-| Visualization | Grafana dashboards over TimescaleDB | Custom web app with WebSocket push |
-| Metrics | Prometheus + Grafana (Flink Prometheus reporter, Iggy metrics endpoint, cAdvisor for container CPU and memory) | — |
+| Visualization (future) | Custom web app with WebSocket push, which may replace the Grafana trading dashboard (§5.1) | — |
 
 ---
 
@@ -58,8 +58,8 @@ Throughput numbers: [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 | `flink-taskmanager` | Workers. Replicated with `--scale taskmanager=k`. |
 | `timescaledb` | Stores EMA results and advisories (`ema_window`, view `advisories`) and the data quality report (`data_issue`, view `data_issue_summary`), for the visualization and correctness checks. Schema: [`config/timescaledb/init.sql`](../config/timescaledb/init.sql). All symbols are stored (FR-3), also for correctness checks; the subscription filter applies to advisory delivery only (§3.6). |
 | `db-setup` | One-shot job: applies the idempotent schema, so new tables also reach an existing database volume (the image's init scripts run only on an empty volume). |
-| `grafana` | Dashboards for the query results (smart visualization) and system metrics. |
-| `prometheus`, `cadvisor` | Collect throughput, latency, backpressure and resource metrics. |
+| `grafana` | Dashboards for the query results (smart visualization), correctness and system metrics (§5.1). http://localhost:3001 (port 3000 is Iggy's HTTP API), admin/admin, anonymous viewers allowed. |
+| `prometheus`, `cadvisor` | Collect throughput, backpressure, checkpoint and resource metrics (Flink reporter, per-container CPU and memory). |
 
 ---
 
@@ -192,7 +192,18 @@ Limits: scaling is bounded by a single host's resources. The Iggy server is sing
 | Resource use | CPU and memory per container (cAdvisor), Flink busy time and backpressure. |
 | Long tail | Per-subtask record counts and busy time, to show the load balance under skew. |
 
-All of these metrics are visible in Grafana dashboards. Raw results are exported for the report.
+All of these metrics are visible in Grafana dashboards, except latency (needs the planned ingestion timestamp, §3.7). Raw results are exported for the report.
+
+### 5.1 Grafana dashboards
+Provisioned from [`config/grafana/dashboards/`](../config/grafana/dashboards/) (JSON; edits in the UI last until Grafana restarts, so export the JSON to keep them). Market times are local exchange time stored as UTC (§3.3), so the market dashboards use the UTC time zone and default to the dataset's week.
+
+| Dashboard | Requirements | Contents |
+|---|---|---|
+| **Trading trends** (home) | FR-14 to FR-19 | Filters: exchange, equity/index, hide or show `initial` advisories, symbol. Market overview: BUY/SELL counts, advisories per hour (BUY up, SELL down, so market-wide moves stand out), the 15 symbols with most crossovers, latest advisories (click a symbol to open it). Per symbol: close, EMA38 and EMA100 with BUY/SELL markers and the EMA warm-up shaded (88 / 231 windows, as the reference plots); the spread (EMA38 − EMA100) / EMA100, where each zero crossing is an advisory; price events per window; the symbol's advisories. |
+| **Correctness and data quality** | NFR-7 to NFR-9 | Output counts; SQL checks on every stored row: FR-11 formula, start at 0 and carried state (FR-12/13), advisory if and only if a crossover (FR-15/16), window bounds (FR-5 to FR-7), no zero closes, `initial` flag. Each must be 0 (all 0 on the full week; about 5 s). Data issues by reason, per hour, the symbols with most price jumps, and the latest issues. |
+| **System metrics** | NFR-2, NFR-5, NFR-10 | Records/s at source, after the quality gate, into the EMA function and as advisories; records per subtask (load balance under skew); busy and backpressured time per task and subtask; watermark progress (replay speed); checkpoints; JVM heap; CPU and memory per container; results written per second (from `emitted_at`). Live, 10 s refresh. |
+
+Not covered yet: per-trader delivery (subscriptions are in a file, not in the database), the comparison with the pandas reference (offline), and end-to-end latency.
 
 Source throughput baseline (done): [`bench/source_throughput.py`](../bench/source_throughput.py) loads a backlog into Iggy, measures how fast the reader drains it at different poll batch sizes, and then runs producer and job together. A verifier operator with parallelism 1 checks for duplicates and gaps per partition. Results are in [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 
@@ -200,7 +211,8 @@ Source throughput baseline (done): [`bench/source_throughput.py`](../bench/sourc
 
 ## 6. Repository Layout
 ```
-docker-compose.yml   iggy, iggy-setup, timescaledb, db-setup, jobmanager, taskmanager ×2, replay-producer
+docker-compose.yml   iggy, iggy-setup, timescaledb, db-setup, jobmanager, taskmanager ×2, replay-producer,
+                     grafana, prometheus, cadvisor
 MEASUREMENTS.md      throughput measurements
 producer-rs/         replay producer + iggy-setup (Rust, Cargo, Dockerfile)
 flink-job/           Flink application: PIPELINE=ema (ema/: EMA, advisories, data quality; unit tests in src/test),
@@ -208,11 +220,11 @@ flink-job/           Flink application: PIPELINE=ema (ema/: EMA, advisories, dat
 bench/               benchmark scripts (source_throughput.py)
 docs/                requirements, architecture, report; figures/reference/ (reference result plots)
 reference/           pandas reference implementation, unit tests, plots
-config/              subscriptions.txt (per-trader advisory subscriptions), timescaledb/init.sql (schema)
+config/              subscriptions.txt (per-trader advisory subscriptions), timescaledb/init.sql (schema),
+                     grafana/ (data sources, dashboards), prometheus/prometheus.yml
 data/                CSV files (git-ignored)
 
 planned:
-config/              Flink conf, Prometheus, Grafana provisioning
 reference/           comparison script (Flink output in TimescaleDB vs reference)
 autoscaler/          (stretch) custom scaling controller
 ```

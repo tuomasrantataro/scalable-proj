@@ -4,7 +4,8 @@
 #   docker compose logs -f taskmanager   # per-node counters
 #   docker compose run --rm replay-producer   # replay the CSV again
 #
-# Flink UI: http://localhost:8081
+# Flink UI: http://localhost:8081   Grafana: http://localhost:3001 (admin/admin; anonymous viewers allowed)
+# Prometheus: http://localhost:9090
 
 x-iggy-env: &iggy-env
   IGGY_USERNAME: iggy
@@ -49,6 +50,9 @@ x-flink-env: &flink-env
     restart-strategy.type: fixed-delay
     restart-strategy.fixed-delay.attempts: 10
     restart-strategy.fixed-delay.delay: 5 s
+    # Prometheus endpoint on every JobManager / TaskManager (scraped by `prometheus`, shown in Grafana)
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: 9249
 
 services:
   iggy:
@@ -58,6 +62,7 @@ services:
     ulimits:
       memlock: { soft: -1, hard: -1 }
     environment:
+      SERVICE: iggy   # container label for cAdvisor (see the cadvisor service)
       IGGY_ROOT_USERNAME: iggy
       IGGY_ROOT_PASSWORD: iggy
       IGGY_NODE_ADVERTISED_ADDRESS: iggy
@@ -79,6 +84,7 @@ services:
     image: timescale/timescaledb:2.31.0-pg17
     shm_size: 512mb   # Docker's 64 MB /dev/shm is too small for parallel queries ("could not resize shared memory segment")
     environment:
+      SERVICE: timescaledb
       POSTGRES_DB: trading
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -128,7 +134,9 @@ services:
     command: standalone-job --job-classname scalable.flink.ConnectorTestJob
     ports:
       - "8081:8081"
-    environment: *flink-env
+    environment:
+      <<: *flink-env
+      SERVICE: jobmanager
     volumes:
       - flink-checkpoints:/flink-checkpoints
       - ./config:/config:ro    # subscriptions.txt
@@ -141,7 +149,9 @@ services:
     command: taskmanager
     deploy:
       replicas: 2
-    environment: *flink-env
+    environment:
+      <<: *flink-env
+      SERVICE: taskmanager
     volumes:
       - flink-checkpoints:/flink-checkpoints
     depends_on: [jobmanager]
@@ -151,6 +161,7 @@ services:
     command: ["replay"]
     environment:
       <<: *iggy-env
+      SERVICE: replay-producer
       IGGY_HOST: iggy
       CSV_FILE: ${CSV_FILE:-/data/pala.csv}
       REPEAT: ${REPEAT:-1}
@@ -162,7 +173,63 @@ services:
     depends_on:
       iggy-setup: { condition: service_completed_successfully }
 
+  # Dashboards (docs/architecture.md §5): Trading trends (FR-19), Correctness & data quality (NFR-7..9),
+  # System metrics (NFR-10). Provisioned from config/grafana; Grafana's own port 3000 is taken by Iggy's HTTP API.
+  grafana:
+    image: grafana/grafana:12.2.1
+    ports:
+      - "3001:3000"
+    environment:
+      SERVICE: grafana
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/trading-trends.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      timescaledb: { condition: service_healthy }
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    environment:
+      SERVICE: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+  # Per-container CPU, memory and network (NFR-10).
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    privileged: true
+    environment:
+      SERVICE: cadvisor
+    devices: [/dev/kmsg]
+    # Docker here uses the containerd image store, which cAdvisor's Docker handler cannot read ("failed to
+    # identify the read-write layer"), so containers are read through containerd (Docker's namespace `moby`).
+    # Compose labels are not visible there; each service sets SERVICE=<name>, exported as `container_env_SERVICE`.
+    command: ["--docker=unix:///nonexistent.sock", "--containerd-namespace=moby", "--docker_only=true",
+              "--housekeeping_interval=5s", "--store_container_labels=false", "--env_metadata_whitelist=SERVICE",
+              "--disable_metrics=percpu,sched,tcp,udp,disk,diskIO,hugetlb,referenced_memory,cpu_topology,resctrl"]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+
 volumes:
   iggy-data:
   timescale-data:
   flink-checkpoints:
+  grafana-data:
+  prometheus-data:
