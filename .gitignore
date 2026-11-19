@@ -3,3 +3,7 @@ target/
 *.iml
 .idea/
 *.pdf
+.venv/
+__pycache__/
+.pytest_cache/
+/reference/output*/

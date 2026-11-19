@@ -2,7 +2,8 @@
 
 Companion to [`requirements.md`](requirements.md). Requirement IDs (FR-x, NFR-x) refer to that document.
 
-Last updated 2026-11-16, after the Iggy → Flink connector experiment. Findings: [`README.md`](../README.md).
+Last updated 2026-11-19, after the pandas reference implementation. Findings: [`README.md`](../README.md),
+[`reference/README.md`](../reference/README.md).
 Throughput numbers: [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 
 ## 1. Technology Decisions
@@ -17,6 +18,7 @@ Throughput numbers: [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 | Language | **Java 17** for the Flink job. Replay producer in **Java or Rust** (drop-in replacements, same CLI and partitioning) | The Rust producer is faster: 1.92M vs 1.39–1.42M msg/s for one trading day. Either is fast enough, because the job limits end-to-end throughput at ~830k msg/s. The Rust SDK reads the clock once per message, which is slow on hosts whose clock source is HPET, so the Rust producer timestamps once per batch ([`MEASUREMENTS.md`](../MEASUREMENTS.md)). |
 | Iggy → Flink integration | **Official connector `org.apache.iggy:flink-connector:0.10.0`**, with checkpointing always on and poll batch ≥ 1000 | Works with several TaskManagers and delivers every message without loss or duplicates in normal operation. Limits: one active reader; one watermark per reader, so the topic needs 1 partition (§3.4); at-most-once, which lost 1.0–1.5% of a day's price events per TaskManager failure; no recovery without checkpointing; and 1 of 7 failovers stalled (see §4.1, §4.3, §7). A **custom Flink source** remains the fallback if exactly-once is required. |
 | Result storage | **TimescaleDB 2.31 (PostgreSQL 17)**, written by the Flink JDBC sink (`flink-connector-jdbc-core:4.1.0-2.2` + PostgreSQL driver 42.7.12) with `INSERT … ON CONFLICT (symbol, window_end) DO UPDATE` | Exact, idempotent upserts on a real primary key, so replays after a restart are harmless. Plain SQL for the pandas correctness comparison, and a built-in Grafana data source. Tested on Flink 2.3 (no build for 2.3 exists yet): identical results across runs, idempotent re-runs, and re-emitted windows absorbed after failover ([`MEASUREMENTS.md`](../MEASUREMENTS.md)). Rejected: InfluxDB (no maintained Flink connector, awkward for relational checks) and ClickHouse (upserts only eventually deduplicated; its scale is not needed: at most ~1.6M rows/day). |
+| Reference implementation | **Python + pandas batch script** ([`reference/`](../reference/README.md)), pyarrow for reading the CSV files, matplotlib for figures | Written from the requirements alone, not from the Flink code, so it can find errors in it (NFR-9). Whole week in ~2.5 min on 4 cores. EMAs evaluated in the same order as FR-11, so values can be compared exactly. Checked against unit tests and an independent `pandas.ewm` computation (identical). It models the stream's late-event rule (watermark = max event time − D), so its advisories are what a correct stream must emit. |
 
 ### 1.2 Proposed (not yet decided)
 | Concern | Proposal | Alternatives |
@@ -24,7 +26,6 @@ Throughput numbers: [`MEASUREMENTS.md`](../MEASUREMENTS.md).
 | Advisory delivery | Iggy output topic `advisories` | — |
 | Visualization | Grafana dashboards over TimescaleDB | Custom web app with WebSocket push |
 | Metrics | Prometheus + Grafana (Flink Prometheus reporter, Iggy metrics endpoint, cAdvisor for container CPU and memory) | — |
-| Reference implementation | Python + pandas batch script over the CSV files | — |
 | Flink state backend | HashMap (heap) state backend. State is tiny: about 5,500 symbols with a few doubles each. | RocksDB |
 
 ---
@@ -93,6 +94,7 @@ IggySource (official connector, one split per partition; in practice one active 
 
 ### 3.4 Watermarks and late events (NFR-7)
 - Strategy: `forBoundedOutOfOrderness(D)`, with D configurable (initial value of a few seconds; to be tuned from a dataset analysis of the actual disorder).
+- **Measured disorder (reference implementation).** In file order, price events are in event-time order per symbol, with one exception: 5,506 rows at the end of 10 Nov re-send the open, day high and day low of 1,812 Paris indices with `Trading time 01:00`, 17.9 h late. Against one global watermark, 189 Xetra `Last = 0` records (`Trading time 00:00`, at the end of each day's file) are late too. Any D from 0 s to 17.9 h therefore gives identical results. A stream must drop these rows: kept, they become the close of a 01:00 window and change the EMAs of 1,812 symbols and about 1,790 advisories. D can be chosen for latency alone.
 - `withIdleness` so that idle partitions (nights, weekend) do not stall the watermark. *Required in any case with the connector: the second source reader never gets a split, and without idleness the watermark stays at `Long.MIN_VALUE` and no window ever fires (measured).*
 - **Use a 1-partition topic with the connector.** It has one watermark per reader, not per partition. With 4 partitions, 54% of the price events arrived late (60 s bound) and half the windows were lost; with 1 partition, 37 events were late (41 in file order). One partition costs nothing, since only one reader is active anyway. A custom source with per-split watermarks would remove this limit.
 - Events later than D plus allowed lateness go to a **side output** and are counted. The rate of late events is reported in the evaluation.
@@ -113,6 +115,8 @@ if ema38 > ema100 and prevEma38 <= prevEma100 → BUY
 if ema38 < ema100 and prevEma38 >= prevEma100 → SELL
 ```
 - **Empty windows (decision):** if a symbol has no price event in a window, its EMAs are not updated and no crossover is evaluated. To be confirmed; see requirements §7.
+- **Zero prices (open decision).** Every symbol gets a `Last = 0` reset record at `Trading time 00:00` each day (316,382 rows in the week, plus some at Xetra's 09:00 and 17:30). FR-9 taken literally makes them price events: 46,733 windows close at 0, each one drags EMA38 below EMA100, and a SELL at 00:05 plus a BUY the next morning follow. With zero prices kept, the week has 25,834 advisories; with them excluded, 11,349. The reference computes both (`--exclude-zero-prices`). The Flink job must use the same rule as the run it is compared with. Excluding them is the meaningful choice; keeping them is the literal one.
+- **Initialization artifact:** the first positive close of a symbol always gives BUY, since both previous EMAs are 0. The reference flags these advisories as `initial` (4,970 in the week).
 - The state survives day boundaries and is included in checkpoints.
 
 ### 3.6 Subscriptions (FR-3, FR-4)
@@ -178,12 +182,13 @@ MEASUREMENTS.md      throughput measurements
 producer/            replay producer + iggy-setup (Java, Maven, Dockerfile)
 flink-job/           Flink application (currently the connector test job: counters + verifier)
 bench/               benchmark scripts (source_throughput.py)
-docs/                requirements, architecture, report
+docs/                requirements, architecture, report; figures/reference/ (reference result plots)
+reference/           pandas reference implementation, unit tests, plots
 data/                CSV files (git-ignored)
 
 planned:
 config/              subscriptions, Flink conf, Prometheus, Grafana provisioning
-reference/           pandas reference implementation + comparison script
+reference/           comparison script (Flink output in TimescaleDB vs reference)
 autoscaler/          (stretch) custom scaling controller
 ```
 

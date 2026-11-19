@@ -1,0 +1,5 @@
+pandas>=3.0
+pyarrow>=20
+numpy>=2.0
+matplotlib>=3.10
+pytest>=8
