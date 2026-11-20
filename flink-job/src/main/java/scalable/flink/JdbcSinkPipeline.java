@@ -17,7 +17,7 @@ import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindo
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
-import org.apache.iggy.connector.flink.source.IggySource;
+import org.apache.flink.connector.kafka.source.KafkaSource;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -25,13 +25,13 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.LongAdder;
 
-import static scalable.flink.ConnectorTestJob.envOr;
+import static scalable.flink.TradingJob.envOr;
 
 /**
  * PIPELINE=jdbc: tests the Flink JDBC connector (flink-connector-jdbc-core 4.1.0-2.2) on Flink 2.3 with TimescaleDB.
  *
  * <pre>
- *   IggySource (price events only) → watermarks (bounded out-of-orderness, idleness)
+ *   KafkaSource (price events only) → watermarks (bounded out-of-orderness, idleness)
  *     → keyBy(symbol) → 5-min tumbling event-time windows: last price by event time, tick count
  *     → JdbcSink: INSERT ... ON CONFLICT (symbol, window_end) DO UPDATE  (writes = writes + 1)
  *   late events → side output → counter
@@ -55,18 +55,15 @@ final class JdbcSinkPipeline {
 
     private JdbcSinkPipeline() {}
 
-    static void build(StreamExecutionEnvironment env, IggySource<PriceTick> source) {
+    static void build(StreamExecutionEnvironment env, KafkaSource<PriceTick> source) {
         long outOfOrdernessS = Long.parseLong(envOr("OUT_OF_ORDERNESS_S", "60"));
-        long idlenessS = Long.parseLong(envOr("IDLENESS_S", "10")); // 0 = no idleness
 
         WatermarkStrategy<PriceTick> wm = WatermarkStrategy
                 .<PriceTick>forBoundedOutOfOrderness(Duration.ofSeconds(outOfOrdernessS))
                 .withTimestampAssigner((t, ts) -> t.eventTime);
-        if (idlenessS > 0) {
-            wm = wm.withIdleness(Duration.ofSeconds(idlenessS));
-        }
+        wm = TradingJob.withIdlenessAndAlignment(wm);
 
-        DataStream<PriceTick> prices = env.fromSource(source, wm, "iggy-source", TypeInformation.of(PriceTick.class));
+        DataStream<PriceTick> prices = env.fromSource(source, wm, "kafka-source", TypeInformation.of(PriceTick.class));
 
         SingleOutputStreamOperator<WindowClose> windows = prices
                 .keyBy(t -> t.symbol)
@@ -107,7 +104,7 @@ final class JdbcSinkPipeline {
         return OffsetDateTime.ofInstant(Instant.ofEpochMilli(epochMs), ZoneOffset.UTC);
     }
 
-    /** Accumulator: last price by event time (ties broken by Iggy offset, so the result is deterministic). */
+    /** Accumulator: last price by event time (ties broken by Kafka offset, so the result is deterministic). */
     public static class Acc {
         public long eventTime = Long.MIN_VALUE;
         public long offset = Long.MIN_VALUE;

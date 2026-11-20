@@ -12,9 +12,7 @@
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- Iggy flink-connector 0.10.0 is built against Flink 2.3.0 -->
         <flink.version>2.3.0</flink.version>
-        <iggy.version>0.10.0</iggy.version>
     </properties>
 
     <dependencies>
@@ -54,10 +52,11 @@
             <artifactId>postgresql</artifactId>
             <version>42.7.12</version>
         </dependency>
+        <!-- Kafka source and sink. No build for Flink 2.3 exists yet; 5.0.0-2.2 is the newest (kafka-clients 4.2.0). -->
         <dependency>
-            <groupId>org.apache.iggy</groupId>
-            <artifactId>flink-connector</artifactId>
-            <version>${iggy.version}</version>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-kafka</artifactId>
+            <version>5.0.0-2.2</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

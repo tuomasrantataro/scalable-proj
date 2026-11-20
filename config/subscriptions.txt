@@ -1,5 +1,5 @@
 # Advisory subscriptions (FR-4): which simulated traders receive BUY/SELL advisories for which symbols.
-# EMAs and advisories are computed for every symbol; only delivery to the Iggy topic `advisories` is filtered,
+# EMAs and advisories are computed for every symbol; only delivery to the Kafka topic `advisories` is filtered,
 # one message per (trader, advisory). Read once when the Flink job starts: edit, then restart the job.
 #
 # Format: trader: SYMBOL SYMBOL, SYMBOL ...   (commas and/or spaces; a trader may span several lines)

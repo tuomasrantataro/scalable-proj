@@ -729,7 +729,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "timescaledb"
           },
-          "rawSql": "SELECT event_time AS \"Event time\", reason AS \"Reason\", symbol AS \"Symbol\", price AS \"Price\", detail AS \"Detail\", iggy_partition AS \"Partition\", iggy_offset AS \"Offset\" FROM data_issue WHERE reason IN ($reason) AND $__timeFilter(event_time) ORDER BY event_time DESC, symbol LIMIT 500",
+          "rawSql": "SELECT event_time AS \"Event time\", reason AS \"Reason\", symbol AS \"Symbol\", price AS \"Price\", detail AS \"Detail\", kafka_partition AS \"Partition\", kafka_offset AS \"Offset\" FROM data_issue WHERE reason IN ($reason) AND $__timeFilter(event_time) ORDER BY event_time DESC, symbol LIMIT 500",
           "format": "table",
           "rawQuery": true,
           "editorMode": "code"

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Flink JDBC connector (4.1.0-2.2) on Flink 2.3 with TimescaleDB: correctness, idempotency, failover.
 
-Phases (all on the same Iggy backlog, each with its own consumer group so it reads from offset 0):
+Phases (all on the same Kafka backlog, each with its own consumer group so it reads from offset 0):
   A  baseline     fresh table; write every closed 5-min window; snapshot it as ref_a
   B  idempotency  same data again, table NOT truncated -> same rows and content, every row writes = 2
-  C  failover     fresh table; kill the TaskManager with the active source reader mid-run, restart it;
+  C  failover     fresh table; kill a TaskManager running a source reader mid-run, restart it;
                   compare with ref_a (missing / changed / extra rows, rows written more than once)
-  D  no idleness  fresh table, IDLENESS_S=0 -> expect no windows (idle reader holds back the watermark)
+  D  no idleness  fresh table, IDLENESS_S=0. With the Iggy connector no window fired (an idle reader held
+                  back the watermark); with Kafka every reader has partitions, so windows should fire.
 
-Usage (repo root; wipes Iggy and TimescaleDB):
+Usage (repo root; wipes Kafka and TimescaleDB):
   python3 bench/jdbc_sink_test.py --data-dir ./data --csv <day>.csv
 """
 import argparse
@@ -60,9 +61,8 @@ def late_events(since):
 
 
 def start_flink(group, extra=None):
-    env = {"PIPELINE": "jdbc", "IGGY_POLL_BATCH": "5000", "IGGY_CONSUMER_GROUP": group, "REPORT_INTERVAL_MS": "1000"}
+    env = {"PIPELINE": "jdbc", "KAFKA_GROUP": group, "REPORT_INTERVAL_MS": "1000"}
     env.update(extra or {})
-    sh("docker compose run --rm --no-deps iggy-setup", env={"IGGY_CONSUMER_GROUP": group})
     sh("docker compose up -d --no-deps --force-recreate jobmanager taskmanager", env=env)
 
 
@@ -92,7 +92,7 @@ def flink_rest(path):
 
 
 def active_source_container():
-    """Container name of the TaskManager whose source subtask has emitted records."""
+    """Container name of the TaskManager whose source subtask has emitted the most records."""
     jobs = [j for j in flink_rest("/jobs")["jobs"] if j["status"] == "RUNNING"]
     job = flink_rest(f"/jobs/{jobs[0]['id']}")
     src = next(v for v in job["vertices"] if v["name"].startswith("Source"))
@@ -107,18 +107,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default="./data")
     ap.add_argument("--csv", required=True)
-    ap.add_argument("--partitions", default="1", help="partitions of topic ticks")
+    ap.add_argument("--partitions", default="8", help="partitions of topic ticks")
     ap.add_argument("--kill-after-rows", type=float, default=0.3, help="phase C: kill at this fraction of ref rows")
     a = ap.parse_args()
-    os.environ["IGGY_PARTITIONS"] = a.partitions  # read by iggy-setup in docker-compose.yml
+    os.environ["KAFKA_PARTITIONS"] = a.partitions  # read by kafka-setup in docker-compose.yml
     print(f"== partitions: {a.partitions}")
 
-    print("== setup: fresh Iggy + TimescaleDB, preload")
+    print("== setup: fresh Kafka + TimescaleDB, preload")
     stop_flink()
     sh("docker compose down -v")
-    sh("docker compose build iggy-setup jobmanager")
-    sh("docker compose up -d --wait iggy timescaledb")
-    sh("docker compose run --rm --no-deps iggy-setup")
+    sh("docker compose build kafka-setup jobmanager")
+    sh("docker compose up -d --wait kafka timescaledb")
+    sh("docker compose run --rm --no-deps kafka-setup")
     out = sh("docker compose run --rm --no-deps replay-producer",
              env={"DATA_DIR": a.data_dir, "CSV_FILE": f"/data/{a.csv}"})
     print("   " + next(l for l in out.splitlines() if "replay done" in l))
@@ -150,7 +150,7 @@ def main():
           f"rows_with_writes=2/other={writes}")
 
     # C: failover
-    print("== C failover: kill the TaskManager with the active source mid-run")
+    print("== C failover: kill a TaskManager with a source reader mid-run")
     sql("TRUNCATE window_close")
     since = now_utc()
     start_flink("jdbc-c")
@@ -178,8 +178,8 @@ def main():
     print(f"   vs A: missing_rows={missing} extra_rows={extra} changed_rows={changed} "
           f"ticks_missing_in_changed_rows={ticks_lost} rows_written_more_than_once={rewritten}")
 
-    # D: no idleness. Expected: the idle reader holds the watermark at Long.MIN_VALUE, no window fires,
-    # window state grows, and (with the default 5 MB in-memory checkpoint storage) checkpoints start failing.
+    # D: no idleness. With the Iggy connector the idle reader held the watermark at Long.MIN_VALUE and no window
+    # fired. With Kafka every reader has partitions, so windows fire; only the last ones wait for more data.
     print("== D no idleness (IDLENESS_S=0), 90 s")
     sql("TRUNCATE window_close")
     start_flink("jdbc-d", {"IDLENESS_S": "0"})

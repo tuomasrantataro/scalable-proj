@@ -7,8 +7,6 @@ COPY src ./src
 RUN mvn -q -B package
 
 FROM flink:2.3.0-java17
-# The connector logs every polled message at INFO; keep it quiet so our counters are readable.
-RUN printf '\nlogger.iggy.name = org.apache.iggy\nlogger.iggy.level = WARN\n' >> /opt/flink/conf/log4j-console.properties
 COPY --from=build /build/target/flink-job.jar /opt/flink/usrlib/flink-job.jar
 # Mount point for the shared checkpoint volume. Created here, owned by flink, so that a new named volume
 # inherits the ownership (a fresh volume is otherwise root-owned and not writable for the flink user).

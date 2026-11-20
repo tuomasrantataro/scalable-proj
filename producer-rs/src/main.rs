@@ -1,71 +1,69 @@
-//! Replay producer and Iggy setup.
+//! Replay producer and Kafka topic setup.
 //!
-//! Modes: `setup` (stream, topics, consumer group) and `replay` (send CSV rows). Partitioning: Java
-//! `String.hashCode()` of the symbol, floor-mod partition count; this keeps the partition assignment of the
-//! original Java producer (removed 2026-11-19), so MEASUREMENTS.md stays comparable. Send loop: one thread,
-//! read `BATCH_SIZE` rows, then one synchronous send call per partition.
+//! Modes: `setup` (create the topics `ticks` and `advisories`) and `replay` (send CSV rows to `ticks`).
+//! Each row is one record: key = symbol ID, value = the CSV row. The partition is chosen here, as Java's
+//! `String.hashCode()` of the symbol floor-mod the partition count (the partitioning used since the first
+//! producer), so all rows of a symbol go to one partition in file order. librdkafka batches and compresses
+//! the records per partition in the background (`linger.ms`, `batch.size`, `compression.type`).
+//!
+//! Threads: one reads the file and hands rows to `PRODUCER_THREADS` sender threads, which share one producer.
+//! Each partition is always sent by the same thread (partition mod threads), so a symbol's rows stay in file
+//! order, and idempotence keeps that order across librdkafka's retries. Several senders are needed because
+//! librdkafka reads the monotonic clock for every record (enqueue time), and on a host whose clock source is
+//! HPET each read is a ~1.4 us system call: one thread then sends only ~250k records/s (MEASUREMENTS.md).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::mpsc::{Receiver, sync_channel};
 use std::time::{Duration, Instant};
 
-use bytes::Bytes;
-use iggy::prelude::*;
+use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+use rdkafka::client::{ClientContext, DefaultClientContext};
+use rdkafka::config::ClientConfig;
+use rdkafka::error::{KafkaError, RDKafkaErrorCode};
+use rdkafka::message::DeliveryResult;
+use rdkafka::producer::{BaseProducer, BaseRecord, Producer, ProducerContext};
+use rdkafka::util::Timeout;
 
 type Res<T> = Result<T, Box<dyn Error>>;
 
-/// Time breakdown for `PROFILE=true`: building messages vs. awaiting `send_messages`.
-static BUILD_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static SEND_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 struct Config {
-    host: String,
-    port: String,
-    user: String,
-    pass: String,
-    stream: String,
+    bootstrap: String,
     topic: String,
-    group: String,
-    partitions: u32,
+    partitions: i32,
     /// Output topic for BUY/SELL advisories (written by the Flink job), and its partition count.
     advisories_topic: String,
-    advisories_partitions: u32,
+    advisories_partitions: i32,
+    /// `retention.ms` of the input topic (-1 = keep forever).
+    retention_ms: String,
     csv_file: String,
     repeat: u32,
     rate: u64,
-    batch: usize,
-    nodelay: bool,
-    /// Diagnostics: print a time breakdown; skip the sends (measures reading + message building only).
-    profile: bool,
-    dry_run: bool,
+    compression: String,
+    linger_ms: String,
+    batch_bytes: String,
+    threads: usize,
 }
 
 impl Config {
     fn from_env() -> Res<Self> {
         Ok(Self {
-            host: env("IGGY_HOST", "iggy"),
-            port: env("IGGY_PORT", "8090"),
-            user: env("IGGY_USERNAME", "iggy"),
-            pass: env("IGGY_PASSWORD", "iggy"),
-            stream: env("IGGY_STREAM", "trading"),
-            topic: env("IGGY_TOPIC", "ticks"),
-            group: env("IGGY_CONSUMER_GROUP", "flink"),
-            partitions: env("IGGY_PARTITIONS", "1").parse()?,
-            advisories_topic: env("IGGY_ADVISORIES_TOPIC", "advisories"),
-            // 1 by default: the connector's sink picks one partition per batch, not per message, so with
-            // more partitions a symbol's advisories could be spread and read out of order.
-            advisories_partitions: env("IGGY_ADVISORIES_PARTITIONS", "1").parse()?,
+            bootstrap: env("KAFKA_BOOTSTRAP", "kafka:9092"),
+            topic: env("KAFKA_TOPIC", "ticks"),
+            partitions: env("KAFKA_PARTITIONS", "8").parse()?,
+            advisories_topic: env("KAFKA_ADVISORIES_TOPIC", "advisories"),
+            advisories_partitions: env("KAFKA_ADVISORIES_PARTITIONS", "4").parse()?,
+            retention_ms: env("KAFKA_RETENTION_MS", "-1"),
             csv_file: env("CSV_FILE", "/data/pala.csv"),
             repeat: env("REPEAT", "1").parse()?,
             rate: env("RATE", "0").parse()?,
-            batch: env("BATCH_SIZE", "4000").parse()?,
-            // The Rust SDK leaves Nagle on by default; the Java SDK sets TCP_NODELAY=true.
-            // With request/response sends, Nagle makes the producer ~3x slower (see MEASUREMENTS.md).
-            nodelay: env("IGGY_TCP_NODELAY", "true").parse()?,
-            profile: env("PROFILE", "false").parse()?,
-            dry_run: env("DRY_RUN", "false").parse()?,
+            compression: env("KAFKA_COMPRESSION", "lz4"),
+            linger_ms: env("KAFKA_LINGER_MS", "20"),
+            batch_bytes: env("KAFKA_BATCH_BYTES", "1000000"),
+            threads: env("PRODUCER_THREADS", "8").parse()?,
         })
     }
 }
@@ -81,108 +79,162 @@ macro_rules! log {
     ($($arg:tt)*) => { println!("[replay-producer] {}", format!($($arg)*)) };
 }
 
-#[tokio::main]
-async fn main() -> Res<()> {
+fn main() -> Res<()> {
     let cfg = Config::from_env()?;
     let mode = std::env::args().nth(1).unwrap_or_else(|| "replay".to_string());
-    let client = connect(&cfg).await?;
     match mode.as_str() {
-        "setup" => setup(&client, &cfg).await?,
-        "replay" => replay(&client, &cfg).await?,
-        other => return Err(format!("unknown mode: {other} (setup|replay)").into()),
+        "setup" => setup(&cfg),
+        "replay" => replay(&cfg),
+        other => Err(format!("unknown mode: {other} (setup|replay)").into()),
     }
-    client.disconnect().await?;
-    Ok(())
 }
 
-async fn connect(cfg: &Config) -> Res<IggyClient> {
-    let url = format!(
-        "iggy://{}:{}@{}:{}?nodelay={}",
-        cfg.user, cfg.pass, cfg.host, cfg.port, cfg.nodelay
-    );
+/// Creates both topics if they do not exist. An existing topic is kept as is, even with another partition count.
+fn setup(cfg: &Config) -> Res<()> {
+    let admin: AdminClient<DefaultClientContext> =
+        ClientConfig::new().set("bootstrap.servers", &cfg.bootstrap).create()?;
+    let topics = [
+        NewTopic::new(&cfg.topic, cfg.partitions, TopicReplication::Fixed(1)).set("retention.ms", &cfg.retention_ms),
+        NewTopic::new(&cfg.advisories_topic, cfg.advisories_partitions, TopicReplication::Fixed(1)),
+    ];
+    let opts = AdminOptions::new().operation_timeout(Some(Timeout::After(Duration::from_secs(10))));
     let mut attempt = 1;
-    loop {
-        let result = async {
-            let client = IggyClient::from_connection_string(&url)?;
-            client.connect().await?;
-            // a cheap authenticated call, so login problems surface here and not mid-replay
-            client.get_streams().await?;
-            Ok::<_, IggyError>(client)
-        }
-        .await;
-        match result {
-            Ok(c) => {
-                log!("connected to {}:{} (tcp nodelay={})", cfg.host, cfg.port, cfg.nodelay);
-                return Ok(c);
-            }
+    let results = loop {
+        match futures::executor::block_on(admin.create_topics(&topics, &opts)) {
+            Ok(r) => break r,
             Err(e) if attempt < 30 => {
-                log!("iggy not ready ({e}), retrying...");
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                log!("kafka not ready ({e}), retrying...");
+                std::thread::sleep(Duration::from_secs(1));
                 attempt += 1;
             }
             Err(e) => return Err(e.into()),
         }
+    };
+    for r in results {
+        match r {
+            Ok(name) => log!("created topic {name}"),
+            Err((name, RDKafkaErrorCode::TopicAlreadyExists)) => log!("topic {name} exists, kept as is"),
+            Err((name, code)) => return Err(format!("creating topic {name}: {code}").into()),
+        }
     }
-}
-
-async fn setup(client: &IggyClient, cfg: &Config) -> Res<()> {
-    let stream = Identifier::named(&cfg.stream)?;
-    let topic = Identifier::named(&cfg.topic)?;
-
-    // Some lookups return None, others an error on "not found": treat both as absent.
-    if !matches!(client.get_stream(&stream).await, Ok(Some(_))) {
-        client.create_stream(&cfg.stream, &StreamCreateOptions::default()).await?;
-        log!("created stream {}", cfg.stream);
-    }
-    ensure_topic(client, &stream, &cfg.topic, cfg.partitions).await?;
-    let group = Identifier::named(&cfg.group)?;
-    if !matches!(client.get_consumer_group(&stream, &topic, &group).await, Ok(Some(_))) {
-        client.create_consumer_group(&stream, &topic, &cfg.group).await?;
-        log!("created consumer group {}", cfg.group);
-    }
-    ensure_topic(client, &stream, &cfg.advisories_topic, cfg.advisories_partitions).await?;
+    let probe: BaseProducer = ClientConfig::new().set("bootstrap.servers", &cfg.bootstrap).create()?;
     for name in [&cfg.topic, &cfg.advisories_topic] {
-        let details = client
-            .get_topic(&stream, &Identifier::named(name)?)
-            .await?
-            .ok_or("topic missing after setup")?;
-        log!("setup done: topic {} with {} partitions", details.name, details.partitions_count);
+        log!("setup done: topic {} with {} partitions", name, partition_count(&probe, name)?);
     }
     Ok(())
 }
 
-/// Creates the topic if it does not exist. An existing topic is kept as is, even with another partition count.
-async fn ensure_topic(client: &IggyClient, stream: &Identifier, name: &str, partitions: u32) -> Res<()> {
-    if !matches!(client.get_topic(stream, &Identifier::named(name)?).await, Ok(Some(_))) {
-        let options = TopicCreateOptions {
-            partitions_count: Some(partitions),
-            ..Default::default()
-        };
-        client.create_topic(stream, name, &options).await?;
-        log!("created topic {} with {} partitions", name, partitions);
+fn partition_count<C: ProducerContext>(producer: &BaseProducer<C>, topic: &str) -> Res<i32> {
+    let md = producer.client().fetch_metadata(Some(topic), Duration::from_secs(10))?;
+    let t = md.topics().first().ok_or("no topic metadata")?;
+    if let Some(e) = t.error() {
+        return Err(format!("topic {topic}: {:?}, run setup first", RDKafkaErrorCode::from(e)).into());
     }
-    Ok(())
+    Ok(t.partitions().len() as i32)
 }
 
-async fn replay(client: &IggyClient, cfg: &Config) -> Res<()> {
-    let stream = Identifier::named(&cfg.stream)?;
-    let topic = Identifier::named(&cfg.topic)?;
-    let partitions = client
-        .get_topic(&stream, &topic)
-        .await?
-        .ok_or("topic not found, run setup first")?
-        .partitions_count;
+/// Counts failed deliveries; librdkafka retries transient errors itself, so these are final.
+struct Deliveries {
+    failed: AtomicU64,
+}
+
+impl ClientContext for Deliveries {}
+
+impl ProducerContext for Deliveries {
+    type DeliveryOpaque = ();
+
+    fn delivery(&self, result: &DeliveryResult<'_>, _: ()) {
+        if let Err((e, _)) = result {
+            if self.failed.fetch_add(1, Relaxed) < 5 {
+                log!("delivery failed: {e}");
+            }
+        }
+    }
+}
+
+/// Rows read per hand-over to a sender thread (and per pacing check).
+const CHUNK: usize = 4096;
+
+/// Rows for one sender thread: (partition, symbol length, row).
+type Chunk = Vec<(i32, usize, Vec<u8>)>;
+
+fn replay(cfg: &Config) -> Res<()> {
+    let producer: BaseProducer<Deliveries> = ClientConfig::new()
+        .set("bootstrap.servers", &cfg.bootstrap)
+        .set("enable.idempotence", "true")
+        .set("compression.type", &cfg.compression)
+        .set("linger.ms", &cfg.linger_ms)
+        .set("batch.size", &cfg.batch_bytes)
+        .set("queue.buffering.max.messages", "2000000")
+        .set("queue.buffering.max.kbytes", "1048576")
+        .create_with_context(Deliveries { failed: AtomicU64::new(0) })?;
+    let partitions = partition_count(&producer, &cfg.topic)?;
+    let threads = cfg.threads.clamp(1, partitions as usize);
+    log!(
+        "connected to {}, topic {} with {} partitions, {} sender threads",
+        cfg.bootstrap, cfg.topic, partitions, threads
+    );
 
     let start = Instant::now();
-    let mut sent: u64 = 0;
-    let mut symbols: HashSet<Vec<u8>> = HashSet::new();
-    let mut batch: Vec<Vec<u8>> = Vec::with_capacity(cfg.batch);
+    let (sent, symbols) = std::thread::scope(|scope| -> Res<(u64, usize)> {
+        let mut senders = Vec::with_capacity(threads);
+        let mut workers = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            let (tx, rx) = sync_channel::<Chunk>(16);
+            senders.push(tx);
+            let producer = &producer;
+            let topic = cfg.topic.as_str();
+            workers.push(scope.spawn(move || send_rows(producer, topic, rx)));
+        }
+        let read = read_rows(cfg, partitions, start, |thread, chunk| {
+            senders[thread].send(chunk).map_err(|_| "sender thread stopped".into())
+        });
+        drop(senders); // closes the channels, so the workers finish
+        for w in workers {
+            w.join().map_err(|_| "sender thread panicked")??;
+        }
+        read
+    })?;
+    producer.flush(Timeout::Never)?;
 
+    let failed = producer.context().failed.load(Relaxed);
+    log!(
+        "replay done: sent {} messages ({} distinct symbols) in {:.2} s{}",
+        sent,
+        symbols,
+        start.elapsed().as_secs_f64(),
+        if failed > 0 { format!(", {failed} FAILED") } else { String::new() }
+    );
+    if failed > 0 {
+        return Err(format!("{failed} records were not delivered").into());
+    }
+    Ok(())
+}
+
+/// Reads the CSV file `repeat` times and hands rows, grouped by sender thread, to `hand_over`.
+/// Returns (rows read, distinct symbols).
+fn read_rows(
+    cfg: &Config,
+    partitions: i32,
+    start: Instant,
+    mut hand_over: impl FnMut(usize, Chunk) -> Res<()>,
+) -> Res<(u64, usize)> {
+    let threads = cfg.threads.clamp(1, partitions as usize);
+    let mut chunks: Vec<Chunk> = (0..threads).map(|_| Vec::with_capacity(CHUNK)).collect();
+    let mut read: u64 = 0;
+    let mut symbols: HashSet<Vec<u8>> = HashSet::new();
+    let mut flush = |chunks: &mut Vec<Chunk>| -> Res<()> {
+        for (t, c) in chunks.iter_mut().enumerate() {
+            if !c.is_empty() {
+                hand_over(t, std::mem::replace(c, Vec::with_capacity(CHUNK)))?;
+            }
+        }
+        Ok(())
+    };
     for _ in 0..cfg.repeat {
         let mut reader = BufReader::with_capacity(1 << 20, File::open(&cfg.csv_file)?);
-        let mut line = Vec::with_capacity(256);
         loop {
-            line.clear();
+            let mut line = Vec::with_capacity(128);
             if reader.read_until(b'\n', &mut line)? == 0 {
                 break;
             }
@@ -194,79 +246,53 @@ async fn replay(client: &IggyClient, cfg: &Config) -> Res<()> {
             if line.iter().all(u8::is_ascii_whitespace) || line.starts_with(b"#") || line.starts_with(b"ID,") {
                 continue;
             }
-            batch.push(line.clone());
-            if batch.len() >= cfg.batch {
-                sent += flush(client, cfg, &stream, &topic, partitions, &mut batch, &mut symbols).await?;
-                pace(start, sent, cfg.rate).await;
+            let symbol_len = line.iter().position(|&b| b == b',').unwrap_or(line.len());
+            let symbol = &line[..symbol_len];
+            if !symbols.contains(symbol) {
+                symbols.insert(symbol.to_vec());
+            }
+            let p = java_string_hash(symbol).rem_euclid(partitions);
+            chunks[p as usize % threads].push((p, symbol_len, line));
+            read += 1;
+            if read % CHUNK as u64 == 0 {
+                flush(&mut chunks)?;
+                pace(start, read, cfg.rate);
             }
         }
-        sent += flush(client, cfg, &stream, &topic, partitions, &mut batch, &mut symbols).await?;
     }
+    flush(&mut chunks)?;
+    Ok((read, symbols.len()))
+}
 
-    log!(
-        "replay done: sent {} messages ({} distinct symbols) in {:.2} s",
-        sent,
-        symbols.len(),
-        start.elapsed().as_secs_f64()
-    );
-    if cfg.profile {
-        use std::sync::atomic::Ordering::Relaxed;
-        let total = start.elapsed().as_secs_f64();
-        let build = BUILD_NS.load(Relaxed) as f64 / 1e9;
-        let send = SEND_NS.load(Relaxed) as f64 / 1e9;
-        log!(
-            "profile: total {total:.2} s = build messages {build:.2} s + send_messages {send:.2} s + read/other {:.2} s{}",
-            total - build - send,
-            if cfg.dry_run { " (DRY_RUN: nothing sent)" } else { "" }
-        );
+/// Sender thread: enqueues each row as a record of its partition, in the order received.
+fn send_rows(producer: &BaseProducer<Deliveries>, topic: &str, rx: Receiver<Chunk>) -> Result<(), String> {
+    for chunk in rx {
+        // Record timestamp (CreateTime) once per chunk: without one, librdkafka reads the wall clock per record.
+        let timestamp = now_ms();
+        for (p, symbol_len, line) in &chunk {
+            let mut record = BaseRecord::to(topic)
+                .partition(*p)
+                .key(&line[..*symbol_len])
+                .payload(&line[..])
+                .timestamp(timestamp);
+            loop {
+                match producer.send(record) {
+                    Ok(()) => break,
+                    Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), r)) => {
+                        record = r;
+                        producer.poll(Duration::from_millis(10)); // wait for the queue to drain
+                    }
+                    Err((e, _)) => return Err(e.to_string()),
+                }
+            }
+        }
+        producer.poll(Duration::ZERO); // serve delivery callbacks
     }
     Ok(())
 }
 
-/// One send call per partition.
-async fn flush(
-    client: &IggyClient,
-    cfg: &Config,
-    stream: &Identifier,
-    topic: &Identifier,
-    partitions: u32,
-    lines: &mut Vec<Vec<u8>>,
-    symbols: &mut HashSet<Vec<u8>>,
-) -> Res<u64> {
-    use std::sync::atomic::Ordering::Relaxed;
-    let t0 = Instant::now();
-    let n = lines.len() as u64;
-    // One clock read per batch, not per message. `IggyMessage::from`/the builder calls
-    // `IggyTimestamp::now()` for every message, which costs ~1.4 us when the kernel clock source is
-    // HPET (TSC marked unstable, as on the laptop in MEASUREMENTS.md): 80 s for one trading day.
-    // The Java SDK sends origin_timestamp = 0 and never reads the clock.
-    let origin_timestamp = IggyTimestamp::now().as_micros();
-    let mut by_partition: BTreeMap<u32, Vec<IggyMessage>> = BTreeMap::new();
-    for l in lines.drain(..) {
-        let symbol = &l[..l.iter().position(|&b| b == b',').unwrap_or(l.len())];
-        let p = java_string_hash(symbol).rem_euclid(partitions as i32) as u32;
-        if !symbols.contains(symbol) {
-            symbols.insert(symbol.to_vec());
-        }
-        let header = IggyMessageHeader {
-            origin_timestamp,
-            payload_length: l.len() as u32,
-            ..Default::default() // id 0: the SDK assigns a random id when encoding, as with the builder
-        };
-        let message = IggyMessage { header, payload: Bytes::from(l), user_headers: None };
-        by_partition.entry(p).or_default().push(message);
-    }
-    let t1 = Instant::now();
-    BUILD_NS.fetch_add((t1 - t0).as_nanos() as u64, Relaxed);
-    if !cfg.dry_run {
-        for (p, mut messages) in by_partition {
-            client
-                .send_messages(stream, topic, &Partitioning::partition_id(p), &mut messages)
-                .await?;
-        }
-    }
-    SEND_NS.fetch_add(t1.elapsed().as_nanos() as u64, Relaxed);
-    Ok(n)
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Java's `String.hashCode()` (s[0]*31^(n-1) + ... + s[n-1], wrapping i32, over UTF-16 units),
@@ -277,14 +303,14 @@ fn java_string_hash(bytes: &[u8]) -> i32 {
         .fold(0i32, |h, c| h.wrapping_mul(31).wrapping_add(c as i32))
 }
 
-async fn pace(start: Instant, sent: u64, rate: u64) {
+fn pace(start: Instant, sent: u64, rate: u64) {
     if rate == 0 {
         return;
     }
     let target = start + Duration::from_secs_f64(sent as f64 / rate as f64);
     let now = Instant::now();
     if target > now {
-        tokio::time::sleep(target - now).await;
+        std::thread::sleep(target - now);
     }
 }
 
@@ -293,7 +319,7 @@ mod tests {
     use super::java_string_hash;
 
     /// (symbol, Java `s.hashCode()`, Java `Math.floorMod(s.hashCode(), 4)`), produced with JDK 25.
-    const JAVA: &[(&str, i32, u32)] = &[
+    const JAVA: &[(&str, i32, i32)] = &[
         ("hello", 99162322, 2),
         ("IACWE.FR", -2065065823, 1),
         ("A2ASZ7.ETR", 528887029, 1),
@@ -306,7 +332,7 @@ mod tests {
         assert_eq!(java_string_hash(b""), 0);
         for &(s, hash, partition) in JAVA {
             assert_eq!(java_string_hash(s.as_bytes()), hash, "{s}");
-            assert_eq!(java_string_hash(s.as_bytes()).rem_euclid(4) as u32, partition, "{s}");
+            assert_eq!(java_string_hash(s.as_bytes()).rem_euclid(4), partition, "{s}");
         }
     }
 }

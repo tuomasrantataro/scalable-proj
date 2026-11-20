@@ -1,6 +1,6 @@
 package scalable.flink.ema;
 
-import org.apache.iggy.connector.serialization.SerializationSchema;
+import org.apache.flink.api.common.serialization.SerializationSchema;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -9,7 +9,8 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Advisory for one trader ({@link TraderAdvisory}) → one JSON message for the Iggy topic `advisories`:
+ * Advisory for one trader ({@link TraderAdvisory}) → the value of one Kafka record in topic `advisories`
+ * (the key is the symbol):
  *
  * <pre>
  * {"trader":"trader-tech","symbol":"ASML.NL","type":"BUY","window_start":"2021-11-10T09:30:00","window_end":"2021-11-10T09:35:00",
@@ -19,7 +20,7 @@ import java.time.format.DateTimeFormatter;
  *
  * Market times are local exchange time without a zone (as in the data); `emitted_at` is a UTC instant.
  * (trader, symbol, window_end) identifies a message: delivery is at-least-once, so consumers deduplicate on it.
- * Written by hand (fixed fields) to avoid depending on the connector's Jackson version.
+ * Written by hand (fixed fields), so no JSON library is needed.
  */
 public class AdvisorySerializer implements SerializationSchema<TraderAdvisory> {
     private static final long serialVersionUID = 1L;

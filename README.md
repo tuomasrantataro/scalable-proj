@@ -1,36 +1,40 @@
 # scalable-proj
 
-Detecting trading trends in the DEBS 2022 tick data: Iggy → Flink → TimescaleDB
+Detecting trading trends in the DEBS 2022 tick data: Kafka → Flink → TimescaleDB
 (see [`docs/architecture.md`](docs/architecture.md)). The Flink job computes EMA38/EMA100 per symbol and
 5-minute window, BUY/SELL crossover advisories, and a report of suspicious input data.
 
 | Service | What it does |
 |---|---|
-| `iggy` | Apache Iggy 0.10.0 server (TCP 8090, HTTP 3000) |
-| `iggy-setup` | One-shot: creates stream `trading`, topic `ticks` (1 partition by default, see below), consumer group `flink`, and output topic `advisories` (1 partition, `IGGY_ADVISORIES_PARTITIONS`; BUY/SELL advisories as JSON from `PIPELINE=ema`) |
-| `jobmanager` | Flink 2.3.0, standalone application mode, runs `scalable.flink.ConnectorTestJob`; `PIPELINE` picks the pipeline: `ema` (default), `full`, `count`, `jdbc` (UI: http://localhost:8081) |
-| `taskmanager` ×2 | 1 slot each, job parallelism 2 |
+| `kafka` | Apache Kafka 4.3.2, one broker in KRaft mode (`kafka:9092` inside Compose, `localhost:9094` from the host) |
+| `kafka-setup` | One-shot: creates the input topic `ticks` (8 partitions, `KAFKA_PARTITIONS`) and the output topic `advisories` (4 partitions, `KAFKA_ADVISORIES_PARTITIONS`; BUY/SELL advisories as JSON from `PIPELINE=ema`, keyed by symbol). Existing topics are kept. |
+| `jobmanager` | Flink 2.3.0, standalone application mode, runs `scalable.flink.TradingJob`; `PIPELINE` picks the pipeline: `ema` (default), `jdbc` (UI: http://localhost:8081) |
+| `taskmanager` ×4 | 1 slot each (`TASKMANAGERS`), job parallelism 4 (`PARALLELISM`; the source can use up to the partition count of `ticks`) |
 | `timescaledb` | TimescaleDB 2.31 (PostgreSQL 17), [schema](config/timescaledb/init.sql): `ema_window` + view `advisories`, `data_issue` + view `data_issue_summary` (`PIPELINE=ema`), `window_close` (`PIPELINE=jdbc`) |
 | `db-setup` | One-shot: applies the idempotent schema (also to an existing database volume) |
-| `replay-producer` | Sends CSV rows to `ticks`, partitioned by symbol ID (Rust, `producer-rs/`) |
+| `replay-producer` | Sends CSV rows to `ticks`, one record per row with the symbol ID as key, partitioned by symbol (Rust with librdkafka, `producer-rs/`; lz4-compressed batches) |
 | `grafana` | Dashboards at http://localhost:3001 (admin/admin; anonymous viewers allowed): Trading trends, Correctness and data quality, System metrics ([architecture §5.1](docs/architecture.md#51-grafana-dashboards)) |
 | `prometheus`, `cadvisor` | Metrics: Flink Prometheus reporter (port 9249 on every Flink container) and CPU/memory per container. Prometheus UI: http://localhost:9090 |
 
 Job topology, `PIPELINE=ema` ([code](flink-job/src/main/java/scalable/flink/ema/)):
 
 ```
-IggySource → parse price rows → watermarks (OUT_OF_ORDERNESS_S, IDLENESS_S)
+KafkaSource → parse price rows → watermarks (OUT_OF_ORDERNESS_S, IDLENESS_S, WATERMARK_ALIGNMENT_S)
   → quality gate ─────────────────────────────────────────────┐ zero prices: dropped, counted
   → keyBy(symbol) → 5-min event-time window: close = latest event time ── late events ──┤
   → keyBy(symbol) → EMA function: EMA38, EMA100, BUY/SELL (keyed state) ── price jumps ──┤
   ├→ TimescaleDB ema_window (upsert)                           TimescaleDB data_issue ◄─┘
-  └→ BUY/SELL only → subscription filter → Iggy topic `advisories` (one JSON message per trader and advisory)
+  └→ BUY/SELL only → subscription filter → Kafka topic `advisories` (one JSON record per trader and advisory)
 ```
 
-Connector test pipelines: `full` (source → per-node counter → keyBy counter, plus a verifier for lost or
-duplicated messages), `count` (source only), `jdbc` (5-min closes into `window_close`).
+Sink test pipeline: `jdbc` (5-min closes into `window_close`).
 
-Connector: `org.apache.iggy:flink-connector:0.10.0` (built against Flink 2.3.0).
+Connector: `org.apache.flink:flink-connector-kafka:5.0.0-2.2` (built for Flink 2.2; tested on 2.3, see
+[MEASUREMENTS.md](MEASUREMENTS.md)). Each partition of `ticks` has its own watermark, partitions are spread over
+all source subtasks, and the read offsets are part of Flink's checkpoints.
+
+Until 2026-11-20 the broker was Apache Iggy 0.10. Its tests, measurements and the reasons for the switch are in
+[`docs/iggy.md`](docs/iggy.md).
 
 ## Run
 
@@ -41,21 +45,23 @@ docker compose logs -f taskmanager | grep scalable.report     # per-node counter
 REPEAT=500 docker compose run --rm replay-producer            # replay again, 500× the file (100k msgs)
 RATE=1000 docker compose run --rm replay-producer             # rate-limited (msgs/s)
 
-docker compose down -v                                        # stop and wipe Iggy data
+docker compose down -v                                        # stop and wipe Kafka, database and metrics data
 ```
 
-Whole week through the EMA job (about 6 min; `IGGY_TOPIC` / `IGGY_CONSUMER_GROUP` select a fresh topic or group):
+Whole week through the EMA job (`KAFKA_TOPIC` / `KAFKA_GROUP` select another topic or a fresh consumer group):
 
 ```bash
-export DATA_DIR=./data IGGY_POLL_BATCH=5000
+export DATA_DIR=./data
 docker compose up -d --build jobmanager taskmanager
 for d in 08 09 10 11 12 13 14; do
   CSV_FILE=/data/debs2022-gc-trading-day-$d-11-21.csv docker compose run --rm --no-deps replay-producer
 done
 docker compose exec timescaledb psql -U postgres -d trading -c 'SELECT * FROM data_issue_summary'
 docker compose exec timescaledb psql -U postgres -d trading -c 'SELECT type, count(*) FROM advisories GROUP BY 1'
-docker compose exec iggy iggy -u iggy -p iggy --tcp-server-address 127.0.0.1:8090 \
-    message poll --offset 0 -m 5 trading advisories 0                     # first advisories from the topic
+docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+    --topic advisories --from-beginning --max-messages 5 --property print.key=true   # first advisories
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+    --describe --group flink                                       # job offsets and lag per partition
 ```
 
 Advisories are delivered per simulated trader, from [`config/subscriptions.txt`](config/subscriptions.txt)
@@ -69,58 +75,30 @@ market dashboards show times in UTC, which is how local exchange time is stored,
 
 Flink unit tests run in the image build (`docker compose build jobmanager`).
 
-Benchmarks (they wipe Iggy; results in [MEASUREMENTS.md](MEASUREMENTS.md)):
+Throughput and scaling runs without the producer in the measurement: load the input into Kafka once, then
+replay the stored backlog into the job as often as needed. Each `run` empties `ema_window` and `data_issue`,
+starts the job with a fresh consumer group, waits until the backlog is read, and prints the time, read rate,
+busy time per task, CPU per container and a digest of the results (also appended to
+`bench/results/backlog_runs.jsonl`). The backlog stays in Kafka until the next `load` or `docker compose down -v`.
 
 ```bash
-python3 bench/source_throughput.py --repeat 1 --data-dir ./data --csv <day>.csv
-python3 bench/jdbc_sink_test.py --partitions 1 --data-dir ./data --csv <day>.csv   # JDBC sink → TimescaleDB
+python3 bench/backlog.py load --data-dir ./data                    # whole week, ~4 min (--days 08 for one day)
+python3 bench/backlog.py run                                       # 4 TaskManagers, parallelism 4
+python3 bench/backlog.py run --taskmanagers 8 --parallelism 8
+python3 bench/backlog.py run --set WATERMARK_ALIGNMENT_S=0         # any job setting from docker-compose.yml
 ```
 
-Options are set with env vars: `IGGY_PARTITIONS` (default 1; the connector has one watermark per reader, so more partitions make events late), `REPEAT`, `RATE`, `DATA_DIR` (default `./docs`),
-`CHECKPOINT_INTERVAL` (default `10 s`), and for `PIPELINE=ema`: `OUT_OF_ORDERNESS_S` (60), `IDLENESS_S` (10),
-`SKEW_REPORT_S` (3600) and `PRICE_JUMP_REPORT` (0.10) for the data quality report, `SUBSCRIPTIONS_FILE`
-(`/config/subscriptions.txt`) and `IGGY_ADVISORY_BATCH` (1).
+JDBC sink and failover test (wipes Kafka and TimescaleDB; results in [MEASUREMENTS.md](MEASUREMENTS.md)):
 
-## Findings (2026-11-16)
+```bash
+python3 bench/jdbc_sink_test.py --data-dir ./data --csv <day>.csv
+```
 
-| Test | Result |
-|---|---|
-| 200 rows, 2 TMs | 200/200 received, no duplicates or gaps. Per-partition counts match Iggy's. |
-| 100k rows while running | 100,200/100,200, no duplicates or gaps |
-| keyBy across TMs | Works: about half of the records cross to the other TM |
-| **Split distribution** | **All 4 partitions go to one source subtask. The other reader stays idle.** The enumerator assigns splits only on `addReader`, so the first reader to register gets every split. The Iggy consumer group shows 1 member. |
-| Kill the source TM, **no checkpointing** | **Job reports RUNNING but consumes nothing.** `addSplitsBack` loses the splits: `IggySourceSplit.equals` includes `currentOffset`, and `sentToReaders` is never cleared. |
-| Kill the source TM, checkpointing on | Recovers. Splits move to the other TM, offsets continue with no gaps or duplicates. |
-
-More notes from reading the connector source:
-- The reader polls with `PollingStrategy.next()` and `autoCommit=true`, so Iggy consumer-group offsets are
-  committed on poll, and offsets stored in the Flink checkpoint are not used for reading. This is at-most-once
-  delivery, not exactly-once: records polled but not processed before a crash would be skipped. This was not
-  reproduced here because the job was idle when the TM was killed.
-- The consumer group must already exist, because the connector does not create it (`iggy-setup` creates it).
-- The connector logs every message at INFO. The Flink image sets `org.apache.iggy` to WARN.
-- `isAvailable()` always returns a completed future, so an idle source busy-polls Iggy.
-
-## Single-reader throughput (2026-11-16)
-
-`python3 bench/source_throughput.py --repeat 10000` (wipes Iggy). Setup: 2M messages (~110 B CSV rows),
-4 partitions, one 16-core host, checkpointing every 10 s. Only one source reader is ever active (see above).
-
-| Run | Result |
-|---|---|
-| Producer alone (batch 4000 per send) | 2M in 9.5 s ≈ **212k msg/s** |
-| Drain backlog, source only, poll batch 100 | **~210k msg/s** (9 s) |
-| Drain backlog, source only, poll batch 1000 | ~540k msg/s (3 s, coarse) |
-| Drain backlog, source only, poll batch 5000 | ~735k msg/s (2 s, coarse) |
-| Live: full pipeline + producer at max, poll batch 5000 | 153k msg/s, kept up with the producer; 2M/2M, no duplicates |
-
-- Counters report once per second, so the 2–3 s drains are accurate to only about ±30–50%. The ranking is reliable.
-- The connector's default poll batch (100) costs about 3× in throughput. Set `IGGY_POLL_BATCH` to at least 1000.
-- The idle reader's TaskManager uses about 100% of a core with no data: `isAvailable()` always returns a
-  completed future, so the reader busy-polls.
-- In the live run the producer was the limit, not the reader.
-
-Conclusion: the connector works with several Flink nodes, but source reading does not scale out (one reader
-gets all partitions) and it is not exactly-once. To get parallel reading and exactly-once, use a fixed
-enumerator (assign splits round-robin as readers register, and seek to the checkpointed offset) or the
-custom-source fallback from architecture.md §7.
+Options are set with env vars: `KAFKA_PARTITIONS` (8) and `KAFKA_RETENTION_MS` (-1 = keep forever), used only
+when `kafka-setup` creates the topic; `REPEAT`, `RATE`, `KAFKA_COMPRESSION` (lz4), `KAFKA_LINGER_MS` (20) and
+`PRODUCER_THREADS` (8) for the producer; `DATA_DIR` (default `./docs`); `TASKMANAGERS` (4), `PARALLELISM` (4),
+`KAFKA_MAX_POLL_RECORDS` (5000), `CHECKPOINT_INTERVAL` (default `10 s`), `OUT_OF_ORDERNESS_S` (60), `IDLENESS_S`
+(10) and `WATERMARK_ALIGNMENT_S` (300; pauses a partition that is that far ahead in event time, see
+[architecture §3.4](docs/architecture.md#34-watermarks-and-late-events-nfr-7)) for the job; and for `PIPELINE=ema`:
+`SKEW_REPORT_S` (3600) and `PRICE_JUMP_REPORT` (0.10) for the data quality report, and `SUBSCRIPTIONS_FILE`
+(`/config/subscriptions.txt`).

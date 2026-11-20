@@ -8,7 +8,8 @@ import org.apache.flink.util.Collector;
 /**
  * Window aggregation for FR-10: the close is the price of the event with the latest event time, not the last
  * one to arrive, so events out of order within a window are handled. Equal event times go to the event that
- * came later in the input (higher Iggy offset), which keeps the result deterministic.
+ * came later in the input (higher Kafka offset; all events of a symbol are in one partition), which keeps the
+ * result deterministic.
  */
 public final class ClosePrice {
     private ClosePrice() {}

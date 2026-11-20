@@ -1,22 +1,24 @@
 package scalable.flink.ema;
 
-import org.apache.iggy.connector.serialization.DeserializationSchema;
-import org.apache.iggy.connector.serialization.RecordMetadata;
-import org.apache.iggy.connector.serialization.TypeDescriptor;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.util.Collector;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 
-/** Iggy message (one CSV row) → {@link MarketEvent}; null for non-price rows, which the connector skips. */
-public class MarketEventDeserializer implements DeserializationSchema<MarketEvent> {
+/** Kafka record (value = one CSV row) → {@link MarketEvent}; non-price rows emit nothing. */
+public class MarketEventDeserializer implements KafkaRecordDeserializationSchema<MarketEvent> {
     private static final long serialVersionUID = 1L;
 
     @Override
-    public MarketEvent deserialize(byte[] data, RecordMetadata meta) {
-        return MarketEventParser.parse(data,
-                meta.getPartitionId() == null ? -1 : meta.getPartitionId(),
-                meta.getOffset() == null ? -1 : meta.getOffset());
+    public void deserialize(ConsumerRecord<byte[], byte[]> record, Collector<MarketEvent> out) {
+        MarketEvent e = MarketEventParser.parse(record.value(), record.partition(), record.offset());
+        if (e != null) {
+            out.collect(e);
+        }
     }
 
     @Override
-    public TypeDescriptor<MarketEvent> getProducedType() {
-        return TypeDescriptor.of(MarketEvent.class);
+    public TypeInformation<MarketEvent> getProducedType() {
+        return TypeInformation.of(MarketEvent.class);
     }
 }

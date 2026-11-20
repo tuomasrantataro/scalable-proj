@@ -12,7 +12,7 @@ import java.util.function.Supplier;
 /** Logs a status line every few seconds, only when it changed. Runs on its own daemon thread. */
 public final class Reporter {
     private static final Logger LOG = LoggerFactory.getLogger("scalable.report");
-    private static final long INTERVAL_MS = Long.parseLong(ConnectorTestJob.envOr("REPORT_INTERVAL_MS", "5000"));
+    private static final long INTERVAL_MS = Long.parseLong(TradingJob.envOr("REPORT_INTERVAL_MS", "5000"));
 
     private final ScheduledExecutorService exec;
     private final Supplier<String> status;

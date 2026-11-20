@@ -4,21 +4,24 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.jdbc.JdbcConnectionOptions;
 import org.apache.flink.connector.jdbc.JdbcExecutionOptions;
 import org.apache.flink.connector.jdbc.JdbcStatementBuilder;
 import org.apache.flink.connector.jdbc.core.datastream.sink.JdbcSink;
+import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
+import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.util.OutputTag;
-import org.apache.iggy.connector.flink.sink.IggySink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import scalable.flink.Reporter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.Types;
 import java.time.Duration;
@@ -27,34 +30,36 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.LongAdder;
 
-import static scalable.flink.ConnectorTestJob.envOr;
-import static scalable.flink.ConnectorTestJob.iggyConnection;
-import static scalable.flink.ConnectorTestJob.source;
+import static scalable.flink.TradingJob.envOr;
+import static scalable.flink.TradingJob.bootstrapServers;
+import static scalable.flink.TradingJob.source;
+import static scalable.flink.TradingJob.withIdlenessAndAlignment;
 
 /**
  * PIPELINE=ema: Query 1 (EMA38/EMA100 per 5-min window) and Query 2 (BUY/SELL crossovers), with a data
  * quality report. Architecture §3.2, §3.5.
  *
  * <pre>
- *   IggySource → MarketEvent (price rows only) → watermarks (bounded out-of-orderness D, idleness)
+ *   KafkaSource → MarketEvent (price rows only) → watermarks (bounded out-of-orderness D, idleness)
  *     → QualityGate ──(dropped / suspicious)──────────────────────────────┐
  *     → keyBy(symbol) → 5-min tumbling event-time window: close, ticks     │
  *         └─(late events)─────────────────────────────────────────────────┤
  *     → keyBy(symbol) → EmaFunction (keyed EmaState) ──(price jumps)───────┤
  *     ├→ JdbcSink: ema_window (upsert on symbol, window_end)                → JdbcSink: data_issue
  *     └→ advisories only (BUY/SELL) → SubscriptionFilter: one copy per subscribed trader
- *          → IggySink: topic `advisories` (JSON, one message per trader and advisory)
+ *          → KafkaSink: topic `advisories` (key symbol, JSON value; one record per trader and advisory)
  * </pre>
  *
  * Subscriptions (FR-4) come from SUBSCRIPTIONS_FILE (default /config/subscriptions.txt), read once at job
  * start; see {@link Subscriptions}. EMAs and the ema_window table still cover every symbol (FR-3).
  *
- * Advisory delivery is at-least-once: the Iggy sink flushes at checkpoints, so after a failure some advisories
- * can be sent again. (trader, symbol, window_end) identifies a message, so consumers can drop repeats.
+ * Advisory delivery is at-least-once: each record is sent at once (linger.ms=0), and the sink flushes at every
+ * checkpoint, so after a failure some advisories can be sent again. (trader, symbol, window_end) identifies a message, so consumers can drop repeats.
  *
- * Settings (env): OUT_OF_ORDERNESS_S (60), IDLENESS_S (10, 0 = off), SKEW_REPORT_S (3600),
+ * Settings (env): OUT_OF_ORDERNESS_S (60), IDLENESS_S (10, 0 = off), WATERMARK_ALIGNMENT_S (300, 0 = off),
+ * SKEW_REPORT_S (3600),
  * PRICE_JUMP_REPORT (0.10), JDBC_URL / JDBC_USER / JDBC_PASSWORD, JDBC_BATCH_SIZE (1000),
- * IGGY_STREAM, IGGY_ADVISORIES_TOPIC (advisories), IGGY_ADVISORY_BATCH (1), SUBSCRIPTIONS_FILE.
+ * KAFKA_BOOTSTRAP, KAFKA_ADVISORIES_TOPIC (advisories), SUBSCRIPTIONS_FILE.
  */
 public final class EmaPipeline {
 
@@ -75,7 +80,7 @@ public final class EmaPipeline {
             """;
 
     private static final String INSERT_ISSUE = """
-            INSERT INTO data_issue (reason, symbol, event_time, price, iggy_partition, iggy_offset, detail)
+            INSERT INTO data_issue (reason, symbol, event_time, price, kafka_partition, kafka_offset, detail)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT DO NOTHING
             """;
@@ -90,7 +95,6 @@ public final class EmaPipeline {
             LOG.warn("no subscriptions in {}: no advisories will be delivered", subscriptionsFile);
         }
         long outOfOrdernessS = Long.parseLong(envOr("OUT_OF_ORDERNESS_S", "60"));
-        long idlenessS = Long.parseLong(envOr("IDLENESS_S", "10"));
         long skewS = Long.parseLong(envOr("SKEW_REPORT_S", "3600"));
         double jump = Double.parseDouble(envOr("PRICE_JUMP_REPORT", "0.10"));
 
@@ -100,12 +104,10 @@ public final class EmaPipeline {
         WatermarkStrategy<MarketEvent> wm = WatermarkStrategy
                 .<MarketEvent>forBoundedOutOfOrderness(Duration.ofSeconds(outOfOrdernessS))
                 .withTimestampAssigner((e, ts) -> e.timeValid ? e.eventTime : Long.MIN_VALUE);
-        if (idlenessS > 0) {
-            wm = wm.withIdleness(Duration.ofSeconds(idlenessS)); // required with the connector (architecture §3.4)
-        }
+        wm = withIdlenessAndAlignment(wm); // architecture §3.4
 
         SingleOutputStreamOperator<MarketEvent> prices = env
-                .fromSource(source(new MarketEventDeserializer()), wm, "iggy-source", TypeInformation.of(MarketEvent.class))
+                .fromSource(source(new MarketEventDeserializer()), wm, "kafka-source", TypeInformation.of(MarketEvent.class))
                 .process(new QualityGate(skewS * 1000)).name("quality-gate");
 
         SingleOutputStreamOperator<PriceWindow> windows = prices
@@ -144,21 +146,22 @@ public final class EmaPipeline {
             ps.setObject(14, ts(r.emittedAt));
         })).name("timescaledb-ema");
 
-        // Query 2 output (FR-15, FR-16): each advisory is sent as soon as its window is evaluated. The connector
-        // flushes a batch only when it is full, or at a checkpoint (its time-based flush is checked only on the
-        // next write), so with batches an advisory could wait for the next checkpoint: batch size 1 by default.
-        // The topic has one partition: the sink picks the partition per batch, not per message.
+        // Query 2 output (FR-15, FR-16): each advisory is sent as soon as its window is evaluated (linger.ms=0).
+        // Key = symbol, so all advisories of a symbol go to one partition, in window order.
+        // At-least-once: exactly-once would use Kafka transactions, which publish only at checkpoints.
         emas.filter(r -> r.advisory != null).name("advisories-only")
                 .flatMap(new SubscriptionFilter(subscriptions)).name("subscriptions")
-                .sinkTo(IggySink.<TraderAdvisory>builder()
-                        .setConnectionConfig(iggyConnection())
-                        .setStreamId(envOr("IGGY_STREAM", "trading"))
-                        .setTopicId(envOr("IGGY_ADVISORIES_TOPIC", "advisories"))
-                        .setSerializer(new AdvisorySerializer())
-                        .setBatchSize(Integer.parseInt(envOr("IGGY_ADVISORY_BATCH", "1")))
-                        .withBalancedPartitioning()
+                .sinkTo(KafkaSink.<TraderAdvisory>builder()
+                        .setBootstrapServers(bootstrapServers())
+                        .setRecordSerializer(KafkaRecordSerializationSchema.<TraderAdvisory>builder()
+                                .setTopic(envOr("KAFKA_ADVISORIES_TOPIC", "advisories"))
+                                .setKeySerializationSchema(ta -> ta.advisory.symbol.getBytes(StandardCharsets.UTF_8))
+                                .setValueSerializationSchema(new AdvisorySerializer())
+                                .build())
+                        .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
+                        .setProperty("linger.ms", "0")
                         .build())
-                .name("iggy-advisories");
+                .name("kafka-advisories");
 
         issues.sinkTo(jdbcSink(INSERT_ISSUE, (ps, i) -> {
             ps.setString(1, i.reason);

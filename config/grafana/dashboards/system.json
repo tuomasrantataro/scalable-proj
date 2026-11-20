@@ -72,7 +72,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Messages read from Iggy per second, now.",
+      "description": "Rows read from Kafka per second (all event types, before parsing), and the consumer lag: rows in Kafka not yet read (sum over source subtasks of each subtask's largest partition lag). Lag near 0 = the job keeps up with the producer.",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -86,8 +86,20 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(flink_taskmanager_job_task_operator_numRecordsOutPerSecond{operator_name=\"Source:_iggy_source\"})",
-          "legendFormat": "messages/s",
+          "expr": "sum(flink_taskmanager_job_task_operator_KafkaSourceReader_KafkaConsumer_records_consumed_rate{operator_name=\"Source:_kafka_source\"})",
+          "legendFormat": "rows/s",
+          "range": false,
+          "instant": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(flink_taskmanager_job_task_operator_KafkaSourceReader_KafkaConsumer_records_lag_max{operator_name=\"Source:_kafka_source\"})",
+          "legendFormat": "lag",
           "range": false,
           "instant": true,
           "editorMode": "code"
@@ -417,8 +429,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(flink_taskmanager_job_task_operator_numRecordsOutPerSecond{operator_name=\"Source:_iggy_source\"})",
-          "legendFormat": "read from Iggy",
+          "expr": "sum(flink_taskmanager_job_task_operator_KafkaSourceReader_KafkaConsumer_records_consumed_rate{operator_name=\"Source:_kafka_source\"})",
+          "legendFormat": "read from Kafka (all rows)",
           "range": true,
           "instant": false,
           "editorMode": "code"
@@ -602,7 +614,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "ms per second a task is busy (1000 = saturated). The busiest task limits throughput. The Iggy source shows 1000 even when idle: the connector's reader busy-polls (architecture \u00a74.1).",
+      "description": "ms per second a task is busy (1000 = saturated). The busiest task limits throughput.",
       "gridPos": {
         "h": 8,
         "w": 12,

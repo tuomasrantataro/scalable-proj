@@ -1,25 +1,24 @@
-# Iggy -> Flink -> TimescaleDB (see docs/architecture.md).
+# Kafka -> Flink -> TimescaleDB (see docs/architecture.md).
 #
-#   docker compose up --build            # iggy, setups, Flink JM + 2 TMs (PIPELINE=ema), replay producer
+#   docker compose up --build            # kafka, setups, Flink JM + TMs (PIPELINE=ema), replay producer
 #   docker compose logs -f taskmanager   # per-node counters
 #   docker compose run --rm replay-producer   # replay the CSV again
 #
 # Flink UI: http://localhost:8081   Grafana: http://localhost:3001 (admin/admin; anonymous viewers allowed)
 # Prometheus: http://localhost:9090
 
-x-iggy-env: &iggy-env
-  IGGY_USERNAME: iggy
-  IGGY_PASSWORD: iggy
-  IGGY_STREAM: trading
-  IGGY_TOPIC: ${IGGY_TOPIC:-ticks}
-  IGGY_ADVISORIES_TOPIC: advisories     # output: BUY/SELL advisories from the Flink job
-  IGGY_CONSUMER_GROUP: ${IGGY_CONSUMER_GROUP:-flink}
+# Client settings shared by the setup, the producer and Flink. (Not given to the kafka service: the broker image
+# reads every KAFKA_* variable as broker configuration.)
+x-kafka-env: &kafka-env
+  KAFKA_BOOTSTRAP: kafka:9092
+  KAFKA_TOPIC: ${KAFKA_TOPIC:-ticks}
+  KAFKA_ADVISORIES_TOPIC: advisories     # output: BUY/SELL advisories from the Flink job
 
 x-flink-env: &flink-env
-  <<: *iggy-env
-  IGGY_ADDRESS: iggy:8090
-  IGGY_POLL_BATCH: ${IGGY_POLL_BATCH:-100}
-  PIPELINE: ${PIPELINE:-ema}           # ema (EMA + advisories) | full (connector test) | count (source only) | jdbc
+  <<: *kafka-env
+  KAFKA_GROUP: ${KAFKA_GROUP:-flink}
+  KAFKA_MAX_POLL_RECORDS: ${KAFKA_MAX_POLL_RECORDS:-5000}
+  PIPELINE: ${PIPELINE:-ema}           # ema (EMA + advisories) | jdbc (TimescaleDB sink test)
   REPORT_INTERVAL_MS: ${REPORT_INTERVAL_MS:-5000}
   # PIPELINE=jdbc (TimescaleDB sink test)
   JDBC_URL: jdbc:postgresql://timescaledb:5432/trading
@@ -27,18 +26,18 @@ x-flink-env: &flink-env
   JDBC_PASSWORD: postgres
   OUT_OF_ORDERNESS_S: ${OUT_OF_ORDERNESS_S:-60}
   IDLENESS_S: ${IDLENESS_S:-10}       # 0 = no idleness
+  # Pause a partition that is this far (event time) ahead of the slowest one; 0 = off (TradingJob)
+  WATERMARK_ALIGNMENT_S: ${WATERMARK_ALIGNMENT_S:-300}
   # PIPELINE=ema data-quality report thresholds
   SKEW_REPORT_S: ${SKEW_REPORT_S:-3600}             # Trading time vs system Time
   PRICE_JUMP_REPORT: ${PRICE_JUMP_REPORT:-0.10}     # close vs previous close of the symbol
-  # Advisories per Iggy send. 1 = each advisory is sent as soon as it is computed; with larger batches the
-  # connector holds a partial batch until the next checkpoint (up to CHECKPOINT_INTERVAL).
-  IGGY_ADVISORY_BATCH: ${IGGY_ADVISORY_BATCH:-1}
   # Per-trader advisory subscriptions (FR-4), read by the job at start (JobManager). Format: config/subscriptions.txt
   SUBSCRIPTIONS_FILE: ${SUBSCRIPTIONS_FILE:-/config/subscriptions.txt}
   FLINK_PROPERTIES: |
     jobmanager.rpc.address: jobmanager
     taskmanager.numberOfTaskSlots: 1
-    parallelism.default: 2
+    # PARALLELISM: the source can use up to the partition count of `ticks` (8)
+    parallelism.default: ${PARALLELISM:-4}
     # Heap (HashMap) state backend: keyed state lives as Java objects on the TaskManager heap. State is
     # small (per symbol: EMAs plus the open window), so RocksDB's disk spill and serialization are not needed.
     state.backend.type: hashmap
@@ -55,30 +54,39 @@ x-flink-env: &flink-env
     metrics.reporter.prom.port: 9249
 
 services:
-  iggy:
-    image: apache/iggy:0.10.0
-    cap_add: [SYS_NICE]
-    security_opt: [seccomp:unconfined]
-    ulimits:
-      memlock: { soft: -1, hard: -1 }
+  # Single Kafka broker in KRaft mode (broker and controller in one process, no ZooKeeper).
+  kafka:
+    image: apache/kafka:4.3.2
     environment:
-      SERVICE: iggy   # container label for cAdvisor (see the cadvisor service)
-      IGGY_ROOT_USERNAME: iggy
-      IGGY_ROOT_PASSWORD: iggy
-      IGGY_NODE_ADVERTISED_ADDRESS: iggy
-      # 0.10 defaults to loopback binds, which are unreachable from other containers
-      IGGY_TCP_ADDRESS: 0.0.0.0:8090
-      IGGY_HTTP_ADDRESS: 0.0.0.0:3000
-      IGGY_QUIC_ENABLED: "false"
-      IGGY_WEBSOCKET_ENABLED: "false"
-      # default NUMA-aware allocation fails inside a container ("only 0 available")
-      IGGY_SHARDING_CPU_ALLOCATION: ${IGGY_SHARDS:-2}
-      IGGY_SHARDING_PIN_CORES: "false"
+      SERVICE: kafka   # container label for cAdvisor (see the cadvisor service)
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # PLAINTEXT for the containers, EXTERNAL (localhost:9094) for tools on the host
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # one broker: internal topics cannot be replicated
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"   # topics come from kafka-setup, with their partition counts
+      KAFKA_HEAP_OPTS: -Xms1g -Xmx1g
     ports:
-      - "8090:8090"   # TCP
-      - "3000:3000"   # HTTP API
+      - "9094:9094"
     volumes:
-      - iggy-data:/local_data
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 20s
+      retries: 30
 
   timescaledb:
     image: timescale/timescaledb:2.31.0-pg17
@@ -110,28 +118,28 @@ services:
     depends_on:
       timescaledb: { condition: service_healthy }
 
-  # Creates stream, input topic `ticks` + consumer group (the Flink connector expects the group to exist)
-  # and output topic `advisories`.
-  iggy-setup:
+  # One-shot: creates the input topic `ticks` and the output topic `advisories` (existing topics are kept).
+  kafka-setup:
     build: ./producer-rs
     image: scalable/producer-rs
     command: ["setup"]
     environment:
-      <<: *iggy-env
-      IGGY_HOST: iggy
-      # 1 partition: the Iggy Flink connector has one watermark per reader, not per partition; with more
-      # partitions about half the events arrive late (MEASUREMENTS.md). Only one reader is active anyway.
-      IGGY_PARTITIONS: ${IGGY_PARTITIONS:-1}
-      # 1 partition: the connector's sink picks one partition per batch (round-robin, or from the batch's first
-      # message), so with more partitions a symbol's advisories could be spread and read out of order.
-      # Advisories are few (~11k per week).
-      IGGY_ADVISORIES_PARTITIONS: ${IGGY_ADVISORIES_PARTITIONS:-1}
-    depends_on: [iggy]
+      <<: *kafka-env
+      # Partitions of `ticks` = the upper bound on source parallelism. Each partition has its own watermark in
+      # the Flink Kafka source, so any count gives the same results (MEASUREMENTS.md).
+      KAFKA_PARTITIONS: ${KAFKA_PARTITIONS:-8}
+      # Kept until deleted (-1), so a loaded backlog can be replayed into the job any number of times
+      # (bench/backlog.py). Kafka's default would delete it 7 days after loading.
+      KAFKA_RETENTION_MS: ${KAFKA_RETENTION_MS:--1}
+      # Advisories are keyed by symbol, so a symbol's advisories stay in order within one partition.
+      KAFKA_ADVISORIES_PARTITIONS: ${KAFKA_ADVISORIES_PARTITIONS:-4}
+    depends_on:
+      kafka: { condition: service_healthy }
 
   jobmanager:
     build: ./flink-job
     image: scalable/flink-job
-    command: standalone-job --job-classname scalable.flink.ConnectorTestJob
+    command: standalone-job --job-classname scalable.flink.TradingJob
     ports:
       - "8081:8081"
     environment:
@@ -141,14 +149,14 @@ services:
       - flink-checkpoints:/flink-checkpoints
       - ./config:/config:ro    # subscriptions.txt
     depends_on:
-      iggy-setup: { condition: service_completed_successfully }
+      kafka-setup: { condition: service_completed_successfully }
       db-setup: { condition: service_completed_successfully }
 
   taskmanager:
     image: scalable/flink-job
     command: taskmanager
     deploy:
-      replicas: 2
+      replicas: ${TASKMANAGERS:-4}   # 1 slot each, so at least PARALLELISM
     environment:
       <<: *flink-env
       SERVICE: taskmanager
@@ -160,21 +168,23 @@ services:
     image: scalable/producer-rs
     command: ["replay"]
     environment:
-      <<: *iggy-env
+      <<: *kafka-env
       SERVICE: replay-producer
-      IGGY_HOST: iggy
       CSV_FILE: ${CSV_FILE:-/data/pala.csv}
       REPEAT: ${REPEAT:-1}
       RATE: ${RATE:-0}
-      BATCH_SIZE: ${BATCH_SIZE:-4000}
-      IGGY_TCP_NODELAY: ${IGGY_TCP_NODELAY:-true}
+      KAFKA_COMPRESSION: ${KAFKA_COMPRESSION:-lz4}   # CSV rows compress about 4x
+      KAFKA_LINGER_MS: ${KAFKA_LINGER_MS:-20}
+      # Sender threads. librdkafka reads the clock for every record, a system call on this laptop (HPET clock
+      # source), so one thread sends only ~250k records/s (MEASUREMENTS.md).
+      PRODUCER_THREADS: ${PRODUCER_THREADS:-8}
     volumes:
       - ${DATA_DIR:-./docs}:/data:ro
     depends_on:
-      iggy-setup: { condition: service_completed_successfully }
+      kafka-setup: { condition: service_completed_successfully }
 
   # Dashboards (docs/architecture.md §5): Trading trends (FR-19), Correctness & data quality (NFR-7..9),
-  # System metrics (NFR-10). Provisioned from config/grafana; Grafana's own port 3000 is taken by Iggy's HTTP API.
+  # System metrics (NFR-10). Provisioned from config/grafana; published on 3001 (3000 was Iggy's HTTP API).
   grafana:
     image: grafana/grafana:12.2.1
     ports:
@@ -228,7 +238,7 @@ services:
       - /dev/disk/:/dev/disk:ro
 
 volumes:
-  iggy-data:
+  kafka-data:
   timescale-data:
   flink-checkpoints:
   grafana-data:

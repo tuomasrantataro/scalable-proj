@@ -7,7 +7,7 @@ public class DataIssue {
     /** Event time (epoch ms) of the event, or the window end for window-level issues. */
     public long eventTime;
     public double price;
-    /** Iggy position of the event, or -1 for window-level issues. Part of the key, so replays are idempotent. */
+    /** Kafka position (partition, offset) of the event, or -1 for window-level issues. Part of the key, so replays are idempotent. */
     public int partition;
     public long offset;
     public String detail;

@@ -1,5 +1,5 @@
 # Scrapes the Flink Prometheus reporter (JobManager + every TaskManager replica) and cAdvisor.
-# Iggy's /metrics endpoint requires a login token in 0.10, so it is not scraped.
+# The Kafka broker is not scraped (it exposes JMX only; consumer lag comes from the Flink Kafka source).
 global:
   scrape_interval: 5s
   evaluation_interval: 5s

@@ -3,14 +3,14 @@ name = "replay-producer"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
-description = "Replay producer and Iggy setup (stream, topics, consumer group)"
+description = "Replay producer and Kafka topic setup"
 publish = false
 
 [dependencies]
-# iggy crate 0.12.0 is the release that matches Iggy server 0.10.0 (both 2026-11-07)
-iggy = "=0.12.0"
-bytes = "1.12"   # same major version as the SDK, to build IggyMessage directly
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# librdkafka, built from source and linked statically (needs cmake and a C compiler at build time).
+# No zlib/SSL: the producer uses lz4 and plaintext.
+rdkafka = { version = "0.39", default-features = false, features = ["cmake-build"] }
+futures = { version = "0.3", default-features = false, features = ["executor"] }
 
 [profile.release]
 lto = "thin"

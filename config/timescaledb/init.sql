@@ -47,19 +47,19 @@ SELECT symbol, advisory AS type, window_start, window_end, window_end AS due_at,
 FROM ema_window
 WHERE advisory IS NOT NULL;
 
--- PIPELINE=ema: suspicious input data. One row per event (keyed by its Iggy position) or per window
--- (iggy_offset = -1), so re-processing after a restart adds nothing. Zero prices are only counted in the
+-- PIPELINE=ema: suspicious input data. One row per event (keyed by its Kafka partition and offset) or per window
+-- (kafka_offset = -1), so re-processing after a restart adds nothing. Zero prices are only counted in the
 -- Flink log (one per symbol and day), not stored here.
 CREATE TABLE IF NOT EXISTS data_issue (
     reason         text             NOT NULL,   -- IssueType: MALFORMED, NEGATIVE_PRICE, LATE, TIME_SKEW, ...
     symbol         text             NOT NULL,
     event_time     timestamptz      NOT NULL,   -- the event's time, or the window end for window-level issues
     price          double precision NOT NULL,
-    iggy_partition integer          NOT NULL,
-    iggy_offset    bigint           NOT NULL,
+    kafka_partition integer         NOT NULL,
+    kafka_offset   bigint           NOT NULL,
     detail         text,
     detected_at    timestamptz      NOT NULL DEFAULT now(),
-    PRIMARY KEY (reason, symbol, event_time, iggy_partition, iggy_offset)
+    PRIMARY KEY (reason, symbol, event_time, kafka_partition, kafka_offset)
 );
 
 CREATE OR REPLACE VIEW data_issue_summary AS
