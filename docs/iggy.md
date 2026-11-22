@@ -222,8 +222,8 @@ so this slowdown is specific to this laptop.
 Question: does the Flink JDBC connector, whose newest release is `flink-connector-jdbc-core:4.1.0-2.2`
 (built for Flink 2.2 and compiled against Flink 2.0.0), work on Flink 2.3?
 
-Script: [`bench/jdbc_sink_test.py`](../bench/jdbc_sink_test.py) (the Iggy version is in git history). Job: `PIPELINE=jdbc` in
-[`JdbcSinkPipeline.java`](../flink-job/src/main/java/scalable/flink/JdbcSinkPipeline.java):
+Script `bench/jdbc_sink_test.py` (Iggy version in git history; the Kafka version was removed after commit
+`0d3acfe`). Job: `PIPELINE=jdbc` in `JdbcSinkPipeline.java` (also removed):
 - price events only (`Last` set); event time = `Date` + `Trading time`
 - watermarks with 60 s bounded out-of-orderness and 10 s idleness
 - `keyBy(symbol)`, 5-minute tumbling event-time windows that keep the last price by event time and a tick count

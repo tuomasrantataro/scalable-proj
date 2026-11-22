@@ -11,8 +11,7 @@ import scalable.flink.ema.EmaPipeline;
 import java.time.Duration;
 
 /**
- * Flink entry point. {@code PIPELINE} picks the job: {@code ema} (default: EMA, advisories, data quality report)
- * or {@code jdbc} (5-min closes into TimescaleDB via the Flink JDBC connector).
+ * Flink entry point: the EMA pipeline (EMA, advisories, data quality report), see {@link EmaPipeline}.
  */
 public final class TradingJob {
 
@@ -20,19 +19,8 @@ public final class TradingJob {
 
     public static void main(String[] args) throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-
-        String pipeline = envOr("PIPELINE", "ema");
-        switch (pipeline) {
-            case "ema" -> {
-                EmaPipeline.build(env);
-                env.execute("trading-trends-ema");
-            }
-            case "jdbc" -> {
-                JdbcSinkPipeline.build(env, source(new PriceDeserializer()));
-                env.execute("jdbc-sink-test");
-            }
-            default -> throw new IllegalArgumentException("unknown PIPELINE: " + pipeline + " (expected ema or jdbc)");
-        }
+        EmaPipeline.build(env);
+        env.execute("trading-trends-ema");
     }
 
     /**

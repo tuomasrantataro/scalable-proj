@@ -7,16 +7,20 @@ the job's own speed. Non-price rows are still sent and filtered in Flink, as in 
   load   Recreates topic `ticks` and fills it with the CSV files while Flink is stopped. Kafka keeps the
          records until the topic is deleted (KAFKA_RETENTION_MS=-1), also across `docker compose down`
          (but not `down -v`, which deletes the kafka-data volume).
-  run    Stops the job, empties the result tables (ema_window, data_issue), starts the job with a fresh consumer
-         group (so it reads the backlog from offset 0), waits until all of it is read and the output is
-         stable, and reports times, read rate, busy time per task, CPU per container and a digest of the
-         results. Each run is also appended to bench/results/backlog_runs.jsonl.
+  reset  Stops the job and removes all results: the tables ema_window and data_issue, the topic
+         `advisories` (recreated empty) and the Flink checkpoints. The loaded events (topic `ticks`) are kept.
+  run    Resets (as above), starts the job with a fresh consumer group (so it reads the backlog from offset 0)
+         and the given scaling, waits until all of it is read and the output is stable, and reports times, read
+         rate, busy time per task, CPU per container and a digest of the results. Each run is also appended to
+         bench/results/backlog_runs.jsonl.
 
 Usage (repo root):
   python3 bench/backlog.py load --data-dir ./data                      # the whole week (default)
   python3 bench/backlog.py load --data-dir ./data --days 08            # one trading day
   python3 bench/backlog.py run                                         # 4 TaskManagers, parallelism 4
   python3 bench/backlog.py run --taskmanagers 8 --parallelism 8
+  python3 bench/backlog.py run --taskmanagers 2 --slots 4 --parallelism 8
+  python3 bench/backlog.py reset
   python3 bench/backlog.py run --set WATERMARK_ALIGNMENT_S=0          # any job setting from docker-compose.yml
 """
 import argparse
@@ -129,19 +133,37 @@ def load(a):
         f"disk: {sh('docker compose exec -T kafka du -sh /var/lib/kafka/data').split()[0]}")
 
 
+def reset(_=None):
+    """Stops the job and removes all results; the events in topic `ticks` are kept."""
+    log("== reset: stopping Flink, removing results (the events in topic ticks are kept)")
+    sh("docker compose rm -sf jobmanager taskmanager")
+    sh("docker compose up -d --wait timescaledb kafka")
+    sh("docker compose run --rm --no-deps db-setup")
+    sql("TRUNCATE ema_window, data_issue")
+    kafka("kafka-topics.sh", "--delete --if-exists --topic advisories")
+    for _ in range(60):  # deletion is asynchronous
+        if "advisories" not in kafka("kafka-topics.sh", "--list").split():
+            break
+        time.sleep(1)
+    sh("docker compose run --rm --no-deps kafka-setup")  # recreates `advisories`; an existing `ticks` is kept
+    sh("docker compose run --rm --no-deps --entrypoint sh jobmanager -c 'rm -rf /flink-checkpoints/*'")
+
+
 def run(a):
     total = topic_records()
     if total == 0:
         sys.exit("topic ticks is empty: run `bench/backlog.py load` first")
+    if a.parallelism > a.taskmanagers * a.slots:
+        sys.exit(f"parallelism {a.parallelism} needs at least that many slots "
+                 f"(TaskManagers {a.taskmanagers} x slots {a.slots})")
     group = "backlog-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     settings = dict(kv.split("=", 1) for kv in a.set)
-    env = {"KAFKA_GROUP": group, "TASKMANAGERS": str(a.taskmanagers), "PARALLELISM": str(a.parallelism), **settings}
-    log(f"== backlog of {total:,} records; TaskManagers={a.taskmanagers} parallelism={a.parallelism} group={group}"
-        + (f" {settings}" if settings else ""))
-    sh("docker compose rm -sf jobmanager taskmanager")
-    sh("docker compose up -d --wait timescaledb kafka prometheus cadvisor")
-    sh("docker compose run --rm --no-deps db-setup")
-    sql("TRUNCATE ema_window, data_issue")
+    env = {"KAFKA_GROUP": group, "TASKMANAGERS": str(a.taskmanagers), "TASK_SLOTS": str(a.slots),
+           "PARALLELISM": str(a.parallelism), **settings}
+    log(f"== backlog of {total:,} records; TaskManagers={a.taskmanagers} slots={a.slots} "
+        f"parallelism={a.parallelism} group={group}" + (f" {settings}" if settings else ""))
+    reset()
+    sh("docker compose up -d --wait prometheus cadvisor")
     sh("docker compose up -d --build --no-deps jobmanager taskmanager", env=env)
 
     job = None
@@ -197,7 +219,7 @@ def run(a):
 
     result = {
         "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "taskmanagers": a.taskmanagers, "parallelism": a.parallelism, "settings": settings, "group": group,
+        "taskmanagers": a.taskmanagers, "slots": a.slots, "parallelism": a.parallelism, "settings": settings, "group": group,
         "records": total, "drain_s": round(drain, 1), "records_per_s": round(total / drain),
         "read_rate_avg": round(avg(rates)), "read_rate_max": round(max(rates, default=0)),
         "ema_rows": int(rows), "buy": int(buy), "sell": int(sell), "issues": issues, "digest": digest,
@@ -227,13 +249,15 @@ def main():
     l.add_argument("--partitions", type=int, default=8)
     r = sub.add_parser("run", help="replay the stored backlog into the job and measure")
     r.add_argument("--taskmanagers", type=int, default=4)
+    r.add_argument("--slots", type=int, default=1, help="task slots per TaskManager")
     r.add_argument("--parallelism", type=int, default=4)
     r.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                    help="job setting from docker-compose.yml, e.g. WATERMARK_ALIGNMENT_S=0 (repeatable)")
     r.add_argument("--stable", type=int, default=30, help="seconds without output change that end the run")
     r.add_argument("--timeout", type=int, default=3600)
+    sub.add_parser("reset", help="stop the job and remove all results; keep the loaded events")
     a = ap.parse_args()
-    load(a) if a.cmd == "load" else run(a)
+    {"load": load, "run": run, "reset": reset}[a.cmd](a)
 
 
 if __name__ == "__main__":

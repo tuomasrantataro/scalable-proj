@@ -3,23 +3,7 @@
 -- Timestamps of market data are local exchange time stored as if UTC (architecture §3.3).
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
--- PIPELINE=jdbc (JDBC sink test, bench/jdbc_sink_test.py): one row per symbol and 5-minute window.
--- Written with INSERT ... ON CONFLICT (symbol, window_end) DO UPDATE, so replays are idempotent.
--- `writes` counts how many times a row was written (1 = written once, >1 = replayed/re-run).
-CREATE TABLE IF NOT EXISTS window_close (
-    symbol          text             NOT NULL,
-    window_start    timestamptz      NOT NULL,
-    window_end      timestamptz      NOT NULL,
-    close           double precision NOT NULL,
-    ticks           bigint           NOT NULL,
-    last_event_time timestamptz      NOT NULL,
-    written_at      timestamptz      NOT NULL DEFAULT now(),
-    writes          integer          NOT NULL DEFAULT 1,
-    PRIMARY KEY (symbol, window_end)   -- a unique key on a hypertable must include the time column
-);
-SELECT create_hypertable('window_close', by_range('window_end', INTERVAL '1 day'), if_not_exists => TRUE);
-
--- PIPELINE=ema: Query 1 + 2 result per symbol and non-empty 5-minute window. Upserted on (symbol, window_end).
+-- Query 1 + 2 result per symbol and non-empty 5-minute window. Upserted on (symbol, window_end).
 CREATE TABLE IF NOT EXISTS ema_window (
     symbol       text             NOT NULL,
     sec_type     text,
@@ -47,7 +31,7 @@ SELECT symbol, advisory AS type, window_start, window_end, window_end AS due_at,
 FROM ema_window
 WHERE advisory IS NOT NULL;
 
--- PIPELINE=ema: suspicious input data. One row per event (keyed by its Kafka partition and offset) or per window
+-- Suspicious input data. One row per event (keyed by its Kafka partition and offset) or per window
 -- (kafka_offset = -1), so re-processing after a restart adds nothing. Zero prices are only counted in the
 -- Flink log (one per symbol and day), not stored here.
 CREATE TABLE IF NOT EXISTS data_issue (

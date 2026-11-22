@@ -98,8 +98,8 @@ On a host whose clock source is TSC this cost should mostly disappear (not measu
 
 ## 4. JDBC sink and failover with the Kafka source
 
-Script: [`bench/jdbc_sink_test.py`](bench/jdbc_sink_test.py). Job: `PIPELINE=jdbc`
-([`JdbcSinkPipeline.java`](flink-job/src/main/java/scalable/flink/JdbcSinkPipeline.java)): price events → 5-min
+Script `bench/jdbc_sink_test.py` and job `PIPELINE=jdbc` (`JdbcSinkPipeline.java`), both since removed (last in
+commit `0d3acfe`): price events → 5-min
 windows (last price by event time, tick count) → `INSERT … ON CONFLICT (symbol, window_end) DO UPDATE` into
 `window_close`, with a `writes` counter per row. One trading day (53,994,554 rows), 8 partitions, 4 TaskManagers,
 checkpoints every 10 s. Each phase uses its own consumer group, so it reads the backlog from offset 0.
@@ -162,6 +162,7 @@ slowest; all aligned runs below give exactly the reference results. Its cost is 
 | 2 | 204.6 s | 1.41M | 1.33M / 1.67M | 1.7× | **893** | 395 / 503 | 221% / 159% / 101% |
 | 4 | 152.9 s | 1.89M | 1.66M / 2.13M | 2.3× | **865** | 480 / 257 | 490% / 275% / 113% |
 | 8 | 135.9 s | 2.13M | 1.89M / 2.75M | 2.6× | 733 | 446 / 43 | 743% / 377% / 101% |
+| 2 × 4 slots, parallelism 8 | 113.0 s | 2.56M | 2.18M / 3.00M | 3.1× | 754 | 452 / 67 | 576% / 379% / 117% |
 
 All four runs: digest `19413a50…`, identical to the reference week. Busy and backpressured in ms/s (1000 = all
 the time), averaged over subtasks.
@@ -175,6 +176,9 @@ the time), averaged over subtasks.
   The single TimescaleDB instance and the shared host are the limit.
 - **The whole week takes about 2.5 min** at parallelism 4–8, about 2× faster than the live run (§1), which was
   limited by the producer.
+- **Fewer, larger TaskManagers were faster at the same parallelism:** 2 TaskManagers × 4 slots took 113 s, 8 ×
+  1 slot 136 s, with less TaskManager CPU (576% vs 743%). A likely reason is that more of the `keyBy` traffic stays
+  inside one JVM instead of being serialized and sent over the network between containers (not verified).
 - Each configuration ran once (the no-alignment runs show ±7% between runs at parallelism 4).
 
 ## Caveats

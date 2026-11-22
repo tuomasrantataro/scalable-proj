@@ -87,7 +87,7 @@ KafkaSource (one split per partition, spread over all source subtasks; one water
   └─► advisories only → subscription filter: one copy per subscribed trader (§3.6)
         → Kafka sink → topic `advisories` (key symbol, JSON value; one record per trader and advisory)
 ```
-*Implemented as `PIPELINE=ema` ([`flink-job/src/main/java/scalable/flink/ema/`](../flink-job/src/main/java/scalable/flink/ema/), the default in `docker-compose.yml`). Full week (289 M rows, 59.4 M usable price events) in 4 min 39 s on one laptop, with the producer running at the same time; the job kept up with the producer ([`MEASUREMENTS.md`](../MEASUREMENTS.md)).*
+*Implemented in [`flink-job/src/main/java/scalable/flink/ema/`](../flink-job/src/main/java/scalable/flink/ema/)). Full week (289 M rows, 59.4 M usable price events) in 4 min 39 s on one laptop, with the producer running at the same time; the job kept up with the producer ([`MEASUREMENTS.md`](../MEASUREMENTS.md)).*
 
 ### 3.3 Windowing (FR-5 to FR-8)
 - 5-minute **event-time tumbling windows**.
@@ -214,9 +214,8 @@ docker-compose.yml   kafka, kafka-setup, timescaledb, db-setup, jobmanager, task
                      grafana, prometheus, cadvisor
 MEASUREMENTS.md      measurements with Kafka (producer, full week, bottleneck, JDBC sink and failover)
 producer-rs/         replay producer + kafka-setup (Rust, rdkafka, Cargo, Dockerfile)
-flink-job/           Flink application: PIPELINE=ema (ema/: EMA, advisories, data quality; unit tests in src/test),
-                     plus the JDBC sink test pipeline (jdbc)
-bench/               benchmark scripts (jdbc_sink_test.py)
+flink-job/           Flink application (ema/: EMA, advisories, data quality; unit tests in src/test)
+bench/               benchmark scripts (backlog.py)
 docs/                requirements, architecture, report; iggy.md (the earlier Iggy setup: tests, measurements,
                      why it was replaced); figures/reference/ (reference result plots)
 reference/           pandas reference implementation, unit tests, plots

@@ -36,7 +36,7 @@ import static scalable.flink.TradingJob.source;
 import static scalable.flink.TradingJob.withIdlenessAndAlignment;
 
 /**
- * PIPELINE=ema: Query 1 (EMA38/EMA100 per 5-min window) and Query 2 (BUY/SELL crossovers), with a data
+ * Query 1 (EMA38/EMA100 per 5-min window) and Query 2 (BUY/SELL crossovers), with a data
  * quality report. Architecture §3.2, §3.5.
  *
  * <pre>

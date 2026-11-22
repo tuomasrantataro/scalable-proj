@@ -1,8 +1,8 @@
 # Kafka -> Flink -> TimescaleDB (see docs/architecture.md).
 #
-#   docker compose up --build            # kafka, setups, Flink JM + TMs (PIPELINE=ema), replay producer
+#   docker compose up -d --build         # everything except the producer (see README: Run)
+#   docker compose run --rm replay-producer   # send a CSV file (profile `producer`: only runs when called)
 #   docker compose logs -f taskmanager   # per-node counters
-#   docker compose run --rm replay-producer   # replay the CSV again
 #
 # Flink UI: http://localhost:8081   Grafana: http://localhost:3001 (admin/admin; anonymous viewers allowed)
 # Prometheus: http://localhost:9090
@@ -18,9 +18,7 @@ x-flink-env: &flink-env
   <<: *kafka-env
   KAFKA_GROUP: ${KAFKA_GROUP:-flink}
   KAFKA_MAX_POLL_RECORDS: ${KAFKA_MAX_POLL_RECORDS:-5000}
-  PIPELINE: ${PIPELINE:-ema}           # ema (EMA + advisories) | jdbc (TimescaleDB sink test)
   REPORT_INTERVAL_MS: ${REPORT_INTERVAL_MS:-5000}
-  # PIPELINE=jdbc (TimescaleDB sink test)
   JDBC_URL: jdbc:postgresql://timescaledb:5432/trading
   JDBC_USER: postgres
   JDBC_PASSWORD: postgres
@@ -28,14 +26,14 @@ x-flink-env: &flink-env
   IDLENESS_S: ${IDLENESS_S:-10}       # 0 = no idleness
   # Pause a partition that is this far (event time) ahead of the slowest one; 0 = off (TradingJob)
   WATERMARK_ALIGNMENT_S: ${WATERMARK_ALIGNMENT_S:-300}
-  # PIPELINE=ema data-quality report thresholds
+  # Data-quality report thresholds
   SKEW_REPORT_S: ${SKEW_REPORT_S:-3600}             # Trading time vs system Time
   PRICE_JUMP_REPORT: ${PRICE_JUMP_REPORT:-0.10}     # close vs previous close of the symbol
   # Per-trader advisory subscriptions (FR-4), read by the job at start (JobManager). Format: config/subscriptions.txt
   SUBSCRIPTIONS_FILE: ${SUBSCRIPTIONS_FILE:-/config/subscriptions.txt}
   FLINK_PROPERTIES: |
     jobmanager.rpc.address: jobmanager
-    taskmanager.numberOfTaskSlots: 1
+    taskmanager.numberOfTaskSlots: ${TASK_SLOTS:-1}
     # PARALLELISM: the source can use up to the partition count of `ticks` (8)
     parallelism.default: ${PARALLELISM:-4}
     # Heap (HashMap) state backend: keyed state lives as Java objects on the TaskManager heap. State is
@@ -156,7 +154,7 @@ services:
     image: scalable/flink-job
     command: taskmanager
     deploy:
-      replicas: ${TASKMANAGERS:-4}   # 1 slot each, so at least PARALLELISM
+      replicas: ${TASKMANAGERS:-4}   # TASKMANAGERS x TASK_SLOTS must be at least PARALLELISM
     environment:
       <<: *flink-env
       SERVICE: taskmanager
@@ -164,8 +162,11 @@ services:
       - flink-checkpoints:/flink-checkpoints
     depends_on: [jobmanager]
 
+  # Not started by `docker compose up` (profile), so it never adds the sample file to a loaded backlog.
+  # Run it explicitly: `docker compose run --rm replay-producer`.
   replay-producer:
     image: scalable/producer-rs
+    profiles: [producer]
     command: ["replay"]
     environment:
       <<: *kafka-env
