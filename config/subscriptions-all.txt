@@ -1,0 +1,3 @@
+# Every trader-facing advisory for every symbol (bench/latency_sweep.py): more latency samples than the
+# per-trader lists in subscriptions.txt. Format: see subscriptions.txt.
+trader-all: *

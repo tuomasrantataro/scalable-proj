@@ -1,6 +1,8 @@
 //! Replay producer and Kafka topic setup.
 //!
-//! Modes: `setup` (create the topics `ticks` and `advisories`) and `replay` (send CSV rows to `ticks`).
+//! Modes: `setup` (create the topics `ticks` and `advisories`), `replay` (send CSV rows to `ticks`) and
+//! `latency` (read `advisories` like a trader's system would and print one JSON line per message with its
+//! receive time, for bench/advisory_latency.py).
 //! Each row is one record: key = symbol ID, value = the CSV row. The partition is chosen here, as Java's
 //! `String.hashCode()` of the symbol floor-mod the partition count (the partitioning used since the first
 //! producer), so all rows of a symbol go to one partition in file order. librdkafka batches and compresses
@@ -20,12 +22,14 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::mpsc::{Receiver, sync_channel};
 use std::time::{Duration, Instant};
 
-use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+use rdkafka::admin::{AdminClient, AdminOptions, AlterConfig, NewTopic, ResourceSpecifier, TopicReplication};
 use rdkafka::client::{ClientContext, DefaultClientContext};
 use rdkafka::config::ClientConfig;
+use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
-use rdkafka::message::DeliveryResult;
+use rdkafka::message::{DeliveryResult, Message, Timestamp};
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer, ProducerContext};
+use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
 use rdkafka::util::Timeout;
 
 type Res<T> = Result<T, Box<dyn Error>>;
@@ -42,6 +46,11 @@ struct Config {
     csv_file: String,
     repeat: u32,
     rate: u64,
+    /// Replay at this multiple of the feed's own pace (the `Time` column; 1 = real time). 0 = off.
+    speedup: f64,
+    /// Only rows whose `Time` is in [start_time, end_time), in ms since midnight (`START_TIME`/`END_TIME`, HH:MM).
+    start_time: Option<i64>,
+    end_time: Option<i64>,
     compression: String,
     linger_ms: String,
     batch_bytes: String,
@@ -60,6 +69,9 @@ impl Config {
             csv_file: env("CSV_FILE", "/data/pala.csv"),
             repeat: env("REPEAT", "1").parse()?,
             rate: env("RATE", "0").parse()?,
+            speedup: env("SPEEDUP", "0").parse()?,
+            start_time: clock_env("START_TIME")?,
+            end_time: clock_env("END_TIME")?,
             compression: env("KAFKA_COMPRESSION", "lz4"),
             linger_ms: env("KAFKA_LINGER_MS", "20"),
             batch_bytes: env("KAFKA_BATCH_BYTES", "1000000"),
@@ -75,6 +87,42 @@ fn env(key: &str, default: &str) -> String {
     }
 }
 
+/// "HH:MM" or "HH:MM:SS[.mmm]" from an env var → ms since midnight; unset or empty → None.
+fn clock_env(key: &str) -> Res<Option<i64>> {
+    let v = env(key, "");
+    if v.is_empty() {
+        return Ok(None);
+    }
+    let full = if v.len() == 5 { format!("{v}:00") } else { v.clone() };
+    clock_ms(full.as_bytes()).map(Some).ok_or_else(|| format!("{key}={v}: expected HH:MM").into())
+}
+
+/// "HH:MM:SS" or "HH:MM:SS.mmm" → ms since midnight.
+fn clock_ms(t: &[u8]) -> Option<i64> {
+    let num = |b: &[u8]| -> Option<i64> {
+        if b.is_empty() || !b.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        std::str::from_utf8(b).ok()?.parse().ok()
+    };
+    if t.len() < 8 || t[2] != b':' || t[5] != b':' {
+        return None;
+    }
+    let (h, m, sec) = (num(&t[0..2])?, num(&t[3..5])?, num(&t[6..8])?);
+    let ms = match t.get(8) {
+        Some(b'.') => num(&t[9..])? * 10i64.pow(3u32.saturating_sub((t.len() - 9) as u32)),
+        None => 0,
+        _ => return None,
+    };
+    Some(((h * 60 + m) * 60 + sec) * 1000 + ms)
+}
+
+/// The `Time` column (4th field: ID,SecType,Date,Time,...) of a CSV row, in ms since midnight.
+fn row_time(line: &[u8]) -> Option<i64> {
+    let mut fields = line.split(|&b| b == b',');
+    clock_ms(fields.nth(3)?)
+}
+
 macro_rules! log {
     ($($arg:tt)*) => { println!("[replay-producer] {}", format!($($arg)*)) };
 }
@@ -85,17 +133,25 @@ fn main() -> Res<()> {
     match mode.as_str() {
         "setup" => setup(&cfg),
         "replay" => replay(&cfg),
-        other => Err(format!("unknown mode: {other} (setup|replay)").into()),
+        "latency" => latency(&cfg),
+        other => Err(format!("unknown mode: {other} (setup|replay|latency)").into()),
     }
 }
 
-/// Creates both topics if they do not exist. An existing topic is kept as is, even with another partition count.
+/// Advisory records are stamped by the broker when stored (LogAppendTime). The Flink Kafka sink would otherwise
+/// give them the record's event time (2021), so they carry no send time and the 7-day retention deletes them
+/// minutes after they are written.
+const ADVISORY_TIMESTAMP: (&str, &str) = ("message.timestamp.type", "LogAppendTime");
+
+/// Creates both topics if they do not exist. An existing topic is kept as is, even with another partition count;
+/// only the timestamp type of `advisories` is set on it.
 fn setup(cfg: &Config) -> Res<()> {
     let admin: AdminClient<DefaultClientContext> =
         ClientConfig::new().set("bootstrap.servers", &cfg.bootstrap).create()?;
     let topics = [
         NewTopic::new(&cfg.topic, cfg.partitions, TopicReplication::Fixed(1)).set("retention.ms", &cfg.retention_ms),
-        NewTopic::new(&cfg.advisories_topic, cfg.advisories_partitions, TopicReplication::Fixed(1)),
+        NewTopic::new(&cfg.advisories_topic, cfg.advisories_partitions, TopicReplication::Fixed(1))
+            .set(ADVISORY_TIMESTAMP.0, ADVISORY_TIMESTAMP.1),
     ];
     let opts = AdminOptions::new().operation_timeout(Some(Timeout::After(Duration::from_secs(10))));
     let mut attempt = 1;
@@ -116,6 +172,13 @@ fn setup(cfg: &Config) -> Res<()> {
             Err((name, RDKafkaErrorCode::TopicAlreadyExists)) => log!("topic {name} exists, kept as is"),
             Err((name, code)) => return Err(format!("creating topic {name}: {code}").into()),
         }
+    }
+    // An advisories topic created before LogAppendTime was introduced. (A non-incremental AlterConfigs replaces
+    // all dynamic settings of the topic; this topic has no others.)
+    let alter = AlterConfig::new(ResourceSpecifier::Topic(&cfg.advisories_topic))
+        .set(ADVISORY_TIMESTAMP.0, ADVISORY_TIMESTAMP.1);
+    for r in futures::executor::block_on(admin.alter_configs([&alter], &opts))? {
+        r.map_err(|(_, code)| format!("setting {} on {}: {code}", ADVISORY_TIMESTAMP.0, cfg.advisories_topic))?;
     }
     let probe: BaseProducer = ClientConfig::new().set("bootstrap.servers", &cfg.bootstrap).create()?;
     for name in [&cfg.topic, &cfg.advisories_topic] {
@@ -176,7 +239,7 @@ fn replay(cfg: &Config) -> Res<()> {
     );
 
     let start = Instant::now();
-    let (sent, symbols) = std::thread::scope(|scope| -> Res<(u64, usize)> {
+    let (sent, symbols, active) = std::thread::scope(|scope| -> Res<(u64, usize, f64)> {
         let mut senders = Vec::with_capacity(threads);
         let mut workers = Vec::with_capacity(threads);
         for _ in 0..threads {
@@ -199,10 +262,11 @@ fn replay(cfg: &Config) -> Res<()> {
 
     let failed = producer.context().failed.load(Relaxed);
     log!(
-        "replay done: sent {} messages ({} distinct symbols) in {:.2} s{}",
+        "replay done: sent {} messages ({} distinct symbols) in {:.2} s (first to last row sent: {:.2} s){}",
         sent,
         symbols,
         start.elapsed().as_secs_f64(),
+        active,
         if failed > 0 { format!(", {failed} FAILED") } else { String::new() }
     );
     if failed > 0 {
@@ -218,11 +282,15 @@ fn read_rows(
     partitions: i32,
     start: Instant,
     mut hand_over: impl FnMut(usize, Chunk) -> Res<()>,
-) -> Res<(u64, usize)> {
+) -> Res<(u64, usize, f64)> {
     let threads = cfg.threads.clamp(1, partitions as usize);
     let mut chunks: Vec<Chunk> = (0..threads).map(|_| Vec::with_capacity(CHUNK)).collect();
     let mut read: u64 = 0;
     let mut symbols: HashSet<Vec<u8>> = HashSet::new();
+    let filtered = cfg.start_time.is_some() || cfg.end_time.is_some();
+    let mut first_time: Option<i64> = None; // feed time of the first row sent, for SPEEDUP
+    let mut first_sent: Option<Instant> = None;
+    let mut last_sent = start;
     let mut flush = |chunks: &mut Vec<Chunk>| -> Res<()> {
         for (t, c) in chunks.iter_mut().enumerate() {
             if !c.is_empty() {
@@ -246,6 +314,28 @@ fn read_rows(
             if line.iter().all(u8::is_ascii_whitespace) || line.starts_with(b"#") || line.starts_with(b"ID,") {
                 continue;
             }
+            if filtered || cfg.speedup > 0.0 {
+                let t = row_time(&line);
+                if filtered {
+                    let Some(t) = t else { continue };
+                    if cfg.start_time.is_some_and(|s| t < s) || cfg.end_time.is_some_and(|e| t >= e) {
+                        continue;
+                    }
+                }
+                // Paced by the feed's own clock: a row is due (t - first) / speedup after the start. Rows
+                // already buffered are handed over before waiting, so nothing sits in a chunk while we sleep.
+                if let (Some(t), true) = (t, cfg.speedup > 0.0) {
+                    let first = *first_time.get_or_insert(t);
+                    let paced_from = *first_sent.get_or_insert_with(Instant::now);
+                    let due = paced_from + Duration::from_secs_f64((t - first).max(0) as f64 / 1000.0 / cfg.speedup);
+                    let now = Instant::now();
+                    last_sent = now.max(due);
+                    if due > now + Duration::from_millis(1) {
+                        flush(&mut chunks)?;
+                        std::thread::sleep(due - now);
+                    }
+                }
+            }
             let symbol_len = line.iter().position(|&b| b == b',').unwrap_or(line.len());
             let symbol = &line[..symbol_len];
             if !symbols.contains(symbol) {
@@ -254,14 +344,22 @@ fn read_rows(
             let p = java_string_hash(symbol).rem_euclid(partitions);
             chunks[p as usize % threads].push((p, symbol_len, line));
             read += 1;
+            first_sent.get_or_insert_with(Instant::now);
             if read % CHUNK as u64 == 0 {
                 flush(&mut chunks)?;
+                // the clock is read per chunk, not per row (~1.4 us per read on HPET hosts); paced rows set it above
+                if cfg.speedup <= 0.0 {
+                    last_sent = Instant::now();
+                }
                 pace(start, read, cfg.rate);
             }
         }
     }
     flush(&mut chunks)?;
-    Ok((read, symbols.len()))
+    // Without a time filter or pacing, rows are sent until the end of the file
+    let last = if filtered || cfg.speedup > 0.0 { last_sent } else { Instant::now() };
+    let active = first_sent.map_or(0.0, |f| last.saturating_duration_since(f).as_secs_f64());
+    Ok((read, symbols.len(), active))
 }
 
 /// Sender thread: enqueues each row as a record of its partition, in the order received.
@@ -291,6 +389,47 @@ fn send_rows(producer: &BaseProducer<Deliveries>, topic: &str, rx: Receiver<Chun
     Ok(())
 }
 
+/// Reads every partition of the advisories topic from the start, without a consumer group (no rebalance delay),
+/// and prints one JSON line per message: receive time, the broker's timestamp and the advisory itself. Starts
+/// with a `{"ready_ms":...}` line: messages stored before it were not received live. Runs until stopped.
+fn latency(cfg: &Config) -> Res<()> {
+    let consumer: BaseConsumer = ClientConfig::new()
+        .set("bootstrap.servers", &cfg.bootstrap)
+        .set("group.id", "advisory-latency") // required by librdkafka; nothing is committed
+        .set("enable.auto.commit", "false")
+        .set("fetch.wait.max.ms", "100")
+        .create()?;
+    let md = consumer.fetch_metadata(Some(&cfg.advisories_topic), Duration::from_secs(10))?;
+    let t = md.topics().first().ok_or("no topic metadata")?;
+    if t.error().is_some() || t.partitions().is_empty() {
+        return Err(format!("topic {} not found, run setup first", cfg.advisories_topic).into());
+    }
+    let mut tpl = TopicPartitionList::new();
+    for p in t.partitions() {
+        tpl.add_partition_offset(&cfg.advisories_topic, p.id(), Offset::Beginning)?;
+    }
+    consumer.assign(&tpl)?;
+    eprintln!("[advisory-latency] reading {} partitions of {}", t.partitions().len(), cfg.advisories_topic);
+    println!("{{\"ready_ms\":{}}}", now_ms());
+    loop {
+        let Some(m) = consumer.poll(Duration::from_secs(1)) else { continue };
+        let m = m?;
+        let received = now_ms();
+        let (ts_type, ts) = match m.timestamp() {
+            Timestamp::LogAppendTime(t) => ("LogAppendTime", t),
+            Timestamp::CreateTime(t) => ("CreateTime", t),
+            Timestamp::NotAvailable => ("none", -1),
+        };
+        let payload = std::str::from_utf8(m.payload().unwrap_or_default()).unwrap_or("null");
+        // stdout is line-buffered, so each line is out as soon as it is written
+        println!(
+            "{{\"received_ms\":{received},\"kafka_ts\":{ts},\"ts_type\":\"{ts_type}\",\"partition\":{},\"offset\":{},\"advisory\":{payload}}}",
+            m.partition(),
+            m.offset()
+        );
+    }
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
@@ -316,7 +455,7 @@ fn pace(start: Instant, sent: u64, rate: u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::java_string_hash;
+    use super::{clock_ms, java_string_hash, row_time};
 
     /// (symbol, Java `s.hashCode()`, Java `Math.floorMod(s.hashCode(), 4)`), produced with JDK 25.
     const JAVA: &[(&str, i32, i32)] = &[
@@ -326,6 +465,17 @@ mod tests {
         ("SGFI.FR", -1547068413, 3),
         ("ZZZZZZZZZZZZ.ETR", -236369387, 1), // overflows i32
     ];
+
+    #[test]
+    fn parses_feed_times() {
+        assert_eq!(clock_ms(b"09:05:01.250"), Some(((9 * 60 + 5) * 60 + 1) * 1000 + 250));
+        assert_eq!(clock_ms(b"09:05:01.5"), Some(((9 * 60 + 5) * 60 + 1) * 1000 + 500));
+        assert_eq!(clock_ms(b"09:05:01"), Some(((9 * 60 + 5) * 60 + 1) * 1000));
+        assert_eq!(clock_ms(b""), None);
+        assert_eq!(clock_ms(b"9:05"), None);
+        assert_eq!(row_time(b"A2ASZ7.ETR,E,08-11-2021,01:01:07.000,,,"), Some(3_667_000));
+        assert_eq!(row_time(b"A2ASZ7.ETR,E"), None);
+    }
 
     #[test]
     fn matches_java_string_hashcode_and_partition() {

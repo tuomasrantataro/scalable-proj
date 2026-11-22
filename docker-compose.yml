@@ -174,6 +174,11 @@ services:
       CSV_FILE: ${CSV_FILE:-/data/pala.csv}
       REPEAT: ${REPEAT:-1}
       RATE: ${RATE:-0}
+      # Pace by the feed's own clock (column Time): 1 = real time, 10 = ten times faster; 0 = off (RATE applies)
+      SPEEDUP: ${SPEEDUP:-0}
+      # Only rows with Time in [START_TIME, END_TIME), HH:MM; empty = all
+      START_TIME: ${START_TIME:-}
+      END_TIME: ${END_TIME:-}
       KAFKA_COMPRESSION: ${KAFKA_COMPRESSION:-lz4}   # CSV rows compress about 4x
       KAFKA_LINGER_MS: ${KAFKA_LINGER_MS:-20}
       # Sender threads. librdkafka reads the clock for every record, a system call on this laptop (HPET clock
@@ -181,6 +186,18 @@ services:
       PRODUCER_THREADS: ${PRODUCER_THREADS:-8}
     volumes:
       - ${DATA_DIR:-./docs}:/data:ro
+    depends_on:
+      kafka-setup: { condition: service_completed_successfully }
+
+  # Stands in for a trader's system: reads topic `advisories` and prints each message with its receive time.
+  # Started and evaluated by bench/advisory_latency.py (used by bench/backlog.py run and scripts/run-live.sh).
+  advisory-latency:
+    image: scalable/producer-rs
+    profiles: [latency]
+    command: ["latency"]
+    environment:
+      <<: *kafka-env
+      SERVICE: advisory-latency
     depends_on:
       kafka-setup: { condition: service_completed_successfully }
 

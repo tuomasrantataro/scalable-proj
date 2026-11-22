@@ -12,7 +12,7 @@ the job's own speed. Non-price rows are still sent and filtered in Flink, as in 
   run    Resets (as above), starts the job with a fresh consumer group (so it reads the backlog from offset 0)
          and the given scaling, waits until all of it is read and the output is stable, and reports times, read
          rate, busy time per task, CPU per container and a digest of the results. Each run is also appended to
-         bench/results/backlog_runs.jsonl.
+         bench/results/backlog_runs.jsonl. Also measures advisory latency (bench/advisory_latency.py).
 
 Usage (repo root):
   python3 bench/backlog.py load --data-dir ./data                      # the whole week (default)
@@ -34,6 +34,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+import advisory_latency
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "bench" / "results" / "backlog_runs.jsonl"
@@ -70,14 +72,14 @@ def topic_records():
     return sum(int(line.rsplit(":", 1)[1]) for line in out.split() if line.count(":") == 2)
 
 
-def group_lag(group):
-    """Records of `ticks` not yet committed by the group (offsets are committed at each checkpoint)."""
+def group_lag(group, topic=TOPIC):
+    """Records of `topic` not yet committed by the group (offsets are committed at each checkpoint)."""
     out = sh(f"docker compose exec -T kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server "
              f"localhost:9092 --describe --group {group}", check=False)
     lag, seen = 0, False
     for line in out.splitlines():
         f = line.split()
-        if len(f) >= 6 and f[1] == TOPIC:
+        if len(f) >= 6 and f[1] == topic:
             seen = True
             lag += int(f[5]) if f[5].isdigit() else 0
             if not f[3].isdigit():  # no committed offset yet for this partition
@@ -149,23 +151,9 @@ def reset(_=None):
     sh("docker compose run --rm --no-deps --entrypoint sh jobmanager -c 'rm -rf /flink-checkpoints/*'")
 
 
-def run(a):
-    total = topic_records()
-    if total == 0:
-        sys.exit("topic ticks is empty: run `bench/backlog.py load` first")
-    if a.parallelism > a.taskmanagers * a.slots:
-        sys.exit(f"parallelism {a.parallelism} needs at least that many slots "
-                 f"(TaskManagers {a.taskmanagers} x slots {a.slots})")
-    group = "backlog-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    settings = dict(kv.split("=", 1) for kv in a.set)
-    env = {"KAFKA_GROUP": group, "TASKMANAGERS": str(a.taskmanagers), "TASK_SLOTS": str(a.slots),
-           "PARALLELISM": str(a.parallelism), **settings}
-    log(f"== backlog of {total:,} records; TaskManagers={a.taskmanagers} slots={a.slots} "
-        f"parallelism={a.parallelism} group={group}" + (f" {settings}" if settings else ""))
-    reset()
-    sh("docker compose up -d --wait prometheus cadvisor")
+def start_job(env):
+    """Starts JobManager and TaskManagers with `env` and waits until every task runs; returns the RUNNING time."""
     sh("docker compose up -d --build --no-deps jobmanager taskmanager", env=env)
-
     job = None
     for _ in range(120):
         try:
@@ -180,6 +168,26 @@ def run(a):
     detail = json.load(urllib.request.urlopen(f"http://localhost:8081/jobs/{job['jid']}"))
     t_running = detail["timestamps"]["RUNNING"] / 1000
     log(f"   job {job['jid']} RUNNING at {datetime.fromtimestamp(t_running, timezone.utc):%H:%M:%S} UTC")
+    return t_running
+
+
+def run(a):
+    total = topic_records()
+    if total == 0:
+        sys.exit("topic ticks is empty: run `bench/backlog.py load` first")
+    if a.parallelism > a.taskmanagers * a.slots:
+        sys.exit(f"parallelism {a.parallelism} needs at least that many slots "
+                 f"(TaskManagers {a.taskmanagers} x slots {a.slots})")
+    group = "backlog-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    settings = dict(kv.split("=", 1) for kv in a.set)
+    env = {"KAFKA_GROUP": group, "TASKMANAGERS": str(a.taskmanagers), "TASK_SLOTS": str(a.slots),
+           "PARALLELISM": str(a.parallelism), **settings}
+    log(f"== backlog of {total:,} records; TaskManagers={a.taskmanagers} slots={a.slots} "
+        f"parallelism={a.parallelism} group={group}" + (f" {settings}" if settings else ""))
+    reset()
+    advisory_latency.start()
+    sh("docker compose up -d --wait prometheus cadvisor")
+    t_running = start_job(env)
 
     # Done = the group has committed every record (offsets are committed at each checkpoint), and the output has
     # not changed for `stable` seconds (the last windows fire after the idleness timeout).
@@ -216,6 +224,7 @@ def run(a):
     rows, buy, sell = sql("SELECT count(*) || ' ' || count(*) FILTER (WHERE advisory = 'BUY') || ' ' || "
                           "count(*) FILTER (WHERE advisory = 'SELL') FROM ema_window").split()
     issues = dict(line.split("|") for line in sql("SELECT reason, count(*) FROM data_issue GROUP BY 1").splitlines())
+    latency = advisory_latency.stop(argparse.Namespace(label=group))
 
     result = {
         "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -224,6 +233,7 @@ def run(a):
         "read_rate_avg": round(avg(rates)), "read_rate_max": round(max(rates, default=0)),
         "ema_rows": int(rows), "buy": int(buy), "sell": int(sell), "issues": issues, "digest": digest,
         "tasks": tasks, "cpu_pct": cpu_pct,
+        "advisory_latency_ms": {"messages": latency["messages"], **latency["ms"]["fired_to_received"]},
     }
     RESULTS.parent.mkdir(exist_ok=True)
     with RESULTS.open("a") as f:

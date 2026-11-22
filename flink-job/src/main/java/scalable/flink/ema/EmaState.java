@@ -38,6 +38,7 @@ public class EmaState {
         out.close = w.close;
         out.closeTime = w.closeTime;
         out.ticks = w.ticks;
+        out.firedAt = w.firedAt;
         out.prevEma38 = ema38;
         out.prevEma100 = ema100;
 

@@ -86,6 +86,7 @@ public final class ClosePrice {
             w.close = a.price;
             w.closeTime = a.time;
             w.ticks = a.ticks;
+            w.firedAt = System.currentTimeMillis();
             out.collect(w);
         }
     }

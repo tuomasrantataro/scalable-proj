@@ -15,10 +15,12 @@ import java.time.format.DateTimeFormatter;
  * <pre>
  * {"trader":"trader-tech","symbol":"ASML.NL","type":"BUY","window_start":"2021-11-10T09:30:00","window_end":"2021-11-10T09:35:00",
  *  "due_at":"2021-11-10T09:35:00","close":712.3,"ema38":711.9,"ema100":711.8,"prev_ema38":711.8,
- *  "prev_ema100":711.8,"initial":false,"emitted_at":"2026-11-19T18:22:31.123Z"}
+ *  "prev_ema100":711.8,"initial":false,"fired_at":"2026-11-19T18:22:31.121Z","emitted_at":"2026-11-19T18:22:31.123Z"}
  * </pre>
  *
- * Market times are local exchange time without a zone (as in the data); `emitted_at` is a UTC instant.
+ * Market times are local exchange time without a zone (as in the data). `fired_at` (the 5-min window closed) and
+ * `emitted_at` (the EMA function produced the result) are UTC wall-clock instants, for latency measurement; the
+ * Kafka record timestamp is the broker's append time (topic `message.timestamp.type=LogAppendTime`).
  * (trader, symbol, window_end) identifies a message: delivery is at-least-once, so consumers deduplicate on it.
  * Written by hand (fixed fields), so no JSON library is needed.
  */
@@ -44,7 +46,8 @@ public class AdvisorySerializer implements SerializationSchema<TraderAdvisory> {
           .append(",\"prev_ema38\":").append(r.prevEma38)
           .append(",\"prev_ema100\":").append(r.prevEma100)
           .append(",\"initial\":").append(r.initial)
-          .append(",\"emitted_at\":\"").append(Instant.ofEpochMilli(r.emittedAt)).append("\"}");
+          .append(",\"fired_at\":\"").append(Instant.ofEpochMilli(r.firedAt))
+          .append("\",\"emitted_at\":\"").append(Instant.ofEpochMilli(r.emittedAt)).append("\"}");
         return sb.toString().getBytes(StandardCharsets.UTF_8);
     }
 

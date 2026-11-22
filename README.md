@@ -7,12 +7,13 @@ Detecting trading trends in the DEBS 2022 tick data: Kafka → Flink → Timesca
 | Service | What it does |
 |---|---|
 | `kafka` | Apache Kafka 4.3.2, one broker in KRaft mode (`kafka:9092` inside Compose, `localhost:9094` from the host) |
-| `kafka-setup` | One-shot: creates the input topic `ticks` (8 partitions, `KAFKA_PARTITIONS`) and the output topic `advisories` (4 partitions, `KAFKA_ADVISORIES_PARTITIONS`; BUY/SELL advisories as JSON, keyed by symbol). Existing topics are kept. |
+| `kafka-setup` | One-shot: creates the input topic `ticks` (8 partitions, `KAFKA_PARTITIONS`) and the output topic `advisories` (4 partitions, `KAFKA_ADVISORIES_PARTITIONS`; BUY/SELL advisories as JSON, keyed by symbol; Kafka timestamp = broker append time). Existing topics are kept. |
 | `jobmanager` | Flink 2.3.0, standalone application mode, runs `scalable.flink.TradingJob` (UI: http://localhost:8081) |
 | `taskmanager` ×4 | `TASKMANAGERS` (4) containers with `TASK_SLOTS` (1) slots each; job parallelism `PARALLELISM` (4; the source can use up to the partition count of the input topic) |
 | `timescaledb` | TimescaleDB 2.31 (PostgreSQL 17), [schema](config/timescaledb/init.sql): `ema_window` + view `advisories`, `data_issue` + view `data_issue_summary` |
 | `db-setup` | One-shot: applies the idempotent schema (also to an existing database volume) |
 | `replay-producer` | Sends CSV rows to the input topic, one record per row with the symbol ID as key, partitioned by symbol (Rust with librdkafka, `producer-rs/`; lz4-compressed batches, 8 sender threads). Not started by `docker compose up` (Compose profile `producer`); the scripts below run it. |
+| `advisory-latency` | Profile `latency`: reads topic `advisories` like a trader's system and prints each message with its receive time; started and evaluated by `bench/advisory_latency.py` |
 | `grafana` | Dashboards at http://localhost:3001 (admin/admin; anonymous viewers allowed): Trading trends, Correctness and data quality, System metrics ([architecture §5.1](docs/architecture.md#51-grafana-dashboards)) |
 | `prometheus`, `cadvisor` | Metrics: Flink Prometheus reporter (port 9249 on every Flink container) and CPU/memory per container. Prometheus UI: http://localhost:9090 |
 
@@ -86,6 +87,26 @@ from the beginning, waits until all are processed, and prints the time, read rat
 task, CPU per container and a digest of the results; each run is also appended to
 `bench/results/backlog_runs.jsonl`. For the whole week the digest must be `19413a50…` ("= reference week" in the
 output); a different digest means the results are wrong, not just slower.
+
+Each `run` (and `scripts/run-live.sh`) also measures advisory latency with
+[`bench/advisory_latency.py`](bench/advisory_latency.py): the `advisory-latency` service reads topic `advisories`
+like a trader's system and records when each message arrives. Reported as p50/p95/p99/max per stage: window fired
+(`fired_at`) → EMA result (`emitted_at`) → stored in Kafka (broker append time) → received; summaries go to
+`bench/results/advisory_latency.jsonl`.
+
+Load/latency curve ([`bench/latency_sweep.py`](bench/latency_sweep.py)): replays the same slice of a day
+(default 8 Nov 09:00–09:30, 3.9 M rows) into a fresh job at several speed-ups of the feed's own clock, from real
+time (1×, about 2,200 events/s) to the producer's maximum, with every symbol subscribed, and draws latency
+p50/p95/p99 against the achieved input rate (`bench/results/latency_sweep/<time>/latency.html`). The default sweep
+takes about an hour (the real-time point alone takes 30 min):
+
+```bash
+python3 bench/latency_sweep.py                                # speeds 1,3,10,30,100,300,max
+python3 bench/latency_sweep.py --speeds 10,30,100,300,0       # without the slow real-time points
+```
+
+The producer's `SPEEDUP` (pace by the feed's `Time` column, 1 = real time) and `START_TIME`/`END_TIME` (HH:MM)
+can also be used directly, e.g. `SPEEDUP=10 START_TIME=09:00 END_TIME=10:00 CSV_FILE=/data/<day>.csv`.
 
 What can be scaled:
 

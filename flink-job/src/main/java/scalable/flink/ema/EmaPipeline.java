@@ -69,13 +69,15 @@ public final class EmaPipeline {
 
     private static final String UPSERT_EMA = """
             INSERT INTO ema_window (symbol, sec_type, window_start, window_end, close, close_time, ticks,
-                                    ema38, ema100, prev_ema38, prev_ema100, advisory, initial, emitted_at, writes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                                    ema38, ema100, prev_ema38, prev_ema100, advisory, initial, fired_at, emitted_at,
+                                    writes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             ON CONFLICT (symbol, window_end) DO UPDATE SET
                 sec_type = EXCLUDED.sec_type, window_start = EXCLUDED.window_start, close = EXCLUDED.close,
                 close_time = EXCLUDED.close_time, ticks = EXCLUDED.ticks, ema38 = EXCLUDED.ema38,
                 ema100 = EXCLUDED.ema100, prev_ema38 = EXCLUDED.prev_ema38, prev_ema100 = EXCLUDED.prev_ema100,
-                advisory = EXCLUDED.advisory, initial = EXCLUDED.initial, emitted_at = EXCLUDED.emitted_at,
+                advisory = EXCLUDED.advisory, initial = EXCLUDED.initial, fired_at = EXCLUDED.fired_at,
+                emitted_at = EXCLUDED.emitted_at,
                 writes = ema_window.writes + 1
             """;
 
@@ -143,7 +145,8 @@ public final class EmaPipeline {
                 ps.setString(12, r.advisory);
             }
             ps.setBoolean(13, r.initial);
-            ps.setObject(14, ts(r.emittedAt));
+            ps.setObject(14, ts(r.firedAt));
+            ps.setObject(15, ts(r.emittedAt));
         })).name("timescaledb-ema");
 
         // Query 2 output (FR-15, FR-16): each advisory is sent as soon as its window is evaluated (linger.ms=0).

@@ -18,16 +18,18 @@ CREATE TABLE IF NOT EXISTS ema_window (
     prev_ema100  double precision NOT NULL,
     advisory     text CHECK (advisory IN ('BUY', 'SELL')),
     initial      boolean          NOT NULL,   -- advisory caused by the EMA = 0 start value
+    fired_at     timestamptz,                 -- wall-clock time the 5-min window fired (watermark passed its end)
     emitted_at   timestamptz      NOT NULL,   -- wall-clock time the Flink EMA function emitted the row
     written_at   timestamptz      NOT NULL DEFAULT now(),
     writes       integer          NOT NULL DEFAULT 1,
     PRIMARY KEY (symbol, window_end)
 );
 SELECT create_hypertable('ema_window', by_range('window_end', INTERVAL '1 day'), if_not_exists => TRUE);
+ALTER TABLE ema_window ADD COLUMN IF NOT EXISTS fired_at timestamptz;   -- for databases created before it
 
 CREATE OR REPLACE VIEW advisories AS
 SELECT symbol, advisory AS type, window_start, window_end, window_end AS due_at, close, ema38, ema100,
-       prev_ema38, prev_ema100, initial, emitted_at
+       prev_ema38, prev_ema100, initial, emitted_at, fired_at
 FROM ema_window
 WHERE advisory IS NOT NULL;
 

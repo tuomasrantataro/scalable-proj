@@ -30,6 +30,7 @@ docker compose up -d --wait kafka >/dev/null 2>&1
 kafka_tool kafka-topics.sh --delete --if-exists --topic "$KAFKA_TOPIC" >/dev/null
 while kafka_tool kafka-topics.sh --list | grep -qx "$KAFKA_TOPIC"; do sleep 1; done
 python3 bench/backlog.py reset   # stops Flink, empties tables, advisories and checkpoints; creates `live` (kafka-setup)
+python3 bench/advisory_latency.py start   # a trader's system: receives the advisories, for latency
 
 echo "== starting all services"
 docker compose up -d --build
@@ -61,4 +62,5 @@ psql_q "SELECT count(*) || ' ema_window rows, ' || count(*) FILTER (WHERE adviso
         || count(*) FILTER (WHERE advisory = 'SELL') || ' SELL' FROM ema_window" | sed 's/^/   /'
 psql_q "SELECT reason || ' ' || events FROM data_issue_summary" | sed 's/^/   issue: /'
 kafka_tool kafka-get-offsets.sh --topic advisories | awk -F: '{ s += $3 } END { print "   advisory messages: " s }'
+python3 bench/advisory_latency.py stop --label "$KAFKA_GROUP"
 echo "   The system keeps running; stop it with: docker compose stop   (or tear down: see README)"

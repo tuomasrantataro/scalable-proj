@@ -18,6 +18,8 @@ public class EmaWindow {
     public String advisory;
     /** True if the previous EMAs were still at their start value 0: the advisory is an initialization artifact. */
     public boolean initial;
+    /** Processing time (epoch ms) when the 5-min window fired (watermark passed its end). */
+    public long firedAt;
     /** Processing time (epoch ms) when the EMA function emitted this result. */
     public long emittedAt;
 
