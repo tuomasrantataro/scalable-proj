@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Advisory Latency Sweep</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb; --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --grid: #e6e5e0; --axis: #b9b8b0; --border: #e6e5e0;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: #1a1a19; --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --grid: #2c2c2a; --axis: #4a4a46; --border: #2c2c2a;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #1a1a19; --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+  --grid: #2c2c2a; --axis: #4a4a46; --border: #2c2c2a;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface); color: var(--text-primary);
+       font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+.sub { color: var(--text-secondary); margin: 0 0 20px; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-secondary); font-size: 13px; margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+.chart { position: relative; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+svg .title { fill: var(--text-secondary); font-size: 12px; }
+svg .speed { fill: var(--text-secondary); }
+svg .direct { font-size: 12px; fill: var(--text-secondary); }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+       border-radius: 6px; padding: 8px 10px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+       white-space: nowrap; display: none; font-variant-numeric: tabular-nums; }
+.tip b { font-weight: 600; }
+.tip .row { display: flex; justify-content: space-between; gap: 14px; color: var(--text-secondary); }
+.tip .row span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.tip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.notes { color: var(--text-secondary); font-size: 13px; margin: 12px 0 28px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 500; }
+th:first-child, td:first-child { text-align: left; }
+h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+</style></head>
+<body><main>
+<h1>Advisory latency vs. input rate</h1>
+<p class="sub" id="sub"></p>
+<div class="legend" id="legend"></div>
+<div class="chart" id="chart"><div class="tip" id="tip"></div></div>
+<p class="notes">Latency = window fired (the watermark passed the window's end) → advisory received by a Kafka
+consumer. Both axes are logarithmic. Labels above the plot are the replay speed-up (1× = the feed's real pace).
+Each point replays the same slice into a fresh job, subscribed to every symbol.</p>
+<h2>All measurements (ms)</h2>
+<div class="table-wrap"><table id="table"></table></div>
+</main>
+<script>
+const DATA = {"points": [{"time": "2026-11-22T21:12:40+00:00", "speedup": 10.0, "label": "10x", "name": "exp-unchained", "settings": {"EXP_EMA_SINK": "unchained"}, "csv": "debs2022-gc-trading-day-08-11-21.csv", "start": "09:00", "end": "09:10", "taskmanagers": 4, "parallelism": 4, "rows": 1412903, "send_s": 32.19, "events_per_s": 43893, "advisories": 3787, "advisory_repeats": 0, "advisory_ms": {"fired_to_emitted": {"p50": 231.0, "p95": 349.0, "p99": 360.0, "max": 361.0}, "emitted_to_stored": {"p50": 10.0, "p95": 36.0, "p99": 46.0, "max": 92.0}, "stored_to_received": {"p50": 8, "p95": 17, "p99": 34, "max": 44}, "fired_to_received": {"p50": 253.0, "p95": 359.0, "p99": 371.0, "max": 372.0}}, "window_ms": {"windows": 6919, "p50": 93.0, "p95": 315.0, "p99": 359.8199999999997, "max": 361.0}}, {"time": "2026-11-22T21:14:12+00:00", "speedup": 100.0, "label": "100x", "name": "exp-unchained", "settings": {"EXP_EMA_SINK": "unchained"}, "csv": "debs2022-gc-trading-day-08-11-21.csv", "start": "09:00", "end": "09:10", "taskmanagers": 4, "parallelism": 4, "rows": 1412903, "send_s": 13.41, "events_per_s": 105362, "advisories": 3787, "advisory_repeats": 0, "advisory_ms": {"fired_to_emitted": {"p50": 312.0, "p95": 579.0, "p99": 584.0, "max": 587.0}, "emitted_to_stored": {"p50": 10.0, "p95": 35.0, "p99": 71.0, "max": 150.0}, "stored_to_received": {"p50": 7, "p95": 17, "p99": 22, "max": 52}, "fired_to_received": {"p50": 331.0, "p95": 586.0, "p99": 591.0, "max": 595.0}}, "window_ms": {"windows": 6919, "p50": 128.0, "p95": 564.0, "p99": 583.0, "max": 587.0}}, {"time": "2026-11-22T21:15:42+00:00", "speedup": 0.0, "label": "max", "name": "exp-unchained", "settings": {"EXP_EMA_SINK": "unchained"}, "csv": "debs2022-gc-trading-day-08-11-21.csv", "start": "09:00", "end": "09:10", "taskmanagers": 4, "parallelism": 4, "rows": 1412903, "send_s": 2.9, "events_per_s": 487208, "advisories": 3787, "advisory_repeats": 0, "advisory_ms": {"fired_to_emitted": {"p50": 445.0, "p95": 586.0, "p99": 596.0, "max": 598.0}, "emitted_to_stored": {"p50": 13.0, "p95": 43.0, "p99": 71.0, "max": 160.0}, "stored_to_received": {"p50": 10, "p95": 24, "p99": 33, "max": 50}, "fired_to_received": {"p50": 471.0, "p95": 605.0, "p99": 626.0, "max": 628.0}}, "window_ms": {"windows": 6919, "p50": 202.0, "p95": 576.0, "p99": 593.0, "max": 598.0}}]};
+const SERIES = [["p50", "p50", "var(--series-1)"], ["p95", "p95", "var(--series-2)"], ["p99", "p99", "var(--series-3)"]];
+const pts = DATA.points.filter(p => p.advisories > 0 && p.events_per_s > 0)
+                       .sort((a, b) => a.events_per_s - b.events_per_s);
+const fmtRate = v => v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M" : v >= 1e3 ? (v / 1e3).toFixed(v >= 1e4 ? 0 : 1) + "k" : String(Math.round(v));
+const speed = p => p.label === "max" ? "max" : p.label.replace(/x$/, "×");
+const fmtMs = v => v == null ? "–" : v >= 1000 ? (v / 1000).toFixed(2) + " s" : Math.round(v) + " ms";
+const p0 = DATA.points[0];
+document.getElementById("sub").textContent = p0 ?
+  `${p0.name ? p0.name + " · " : ""}${Object.entries(p0.settings || {}).map(([k, v]) => k + "=" + v).join(" ")}${Object.keys(p0.settings || {}).length ? " · " : ""}${p0.csv}, ${p0.start}–${p0.end} · ${p0.taskmanagers} TaskManagers, parallelism ${p0.parallelism} · ${DATA.points.length} points` : "no points yet";
+document.getElementById("legend").innerHTML = SERIES.map(([, n, c]) => `<span><i style="background:${c}"></i>${n}</span>`).join("");
+
+const W = 900, H = 420, M = {l: 56, r: 48, t: 34, b: 44};
+const svgNS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(svgNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent.appendChild(e); return e; };
+const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Advisory latency percentiles against input rate"}, document.getElementById("chart"));
+if (pts.length) {
+  const xs = pts.map(p => p.events_per_s);
+  const ys = pts.flatMap(p => SERIES.map(([k]) => p.advisory_ms.fired_to_received[k])).filter(v => v > 0);
+  const lx0 = Math.floor(Math.log10(Math.min(...xs))), lx1 = Math.ceil(Math.log10(Math.max(...xs)));
+  const ly0 = Math.floor(Math.log10(Math.max(0.5, Math.min(...ys)))), ly1 = Math.ceil(Math.log10(Math.max(...ys)));
+  const X = v => M.l + (Math.log10(v) - lx0) / Math.max(1e-9, lx1 - lx0) * (W - M.l - M.r);
+  const Y = v => H - M.b - (Math.log10(Math.max(v, Math.pow(10, ly0))) - ly0) / Math.max(1e-9, ly1 - ly0) * (H - M.t - M.b);
+  for (let d = ly0; d <= ly1; d++) {
+    const y = Y(Math.pow(10, d));
+    el("line", {x1: M.l, x2: W - M.r, y1: y, y2: y, stroke: "var(--grid)", "stroke-width": 1}, svg);
+    el("text", {x: M.l - 8, y: y + 4, "text-anchor": "end"}, svg, fmtMs(Math.pow(10, d)).replace(" ", " "));
+  }
+  for (let d = lx0; d <= lx1; d++) for (const m of (lx1 - lx0 <= 3 ? [1, 2, 5] : [1])) {
+    const v = m * Math.pow(10, d);
+    if (v > Math.pow(10, lx1)) continue;
+    const x = X(v);
+    el("line", {x1: x, x2: x, y1: H - M.b, y2: H - M.b + 4, stroke: "var(--axis)"}, svg);
+    el("text", {x, y: H - M.b + 18, "text-anchor": "middle"}, svg, fmtRate(v) + "/s");
+  }
+  el("line", {x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b, stroke: "var(--axis)"}, svg);
+  el("text", {x: (M.l + W - M.r) / 2, y: H - 6, "text-anchor": "middle", class: "title"}, svg, "input rate (events/s, achieved)");
+  for (const p of pts) el("text", {x: X(p.events_per_s), y: M.t - 14, "text-anchor": "middle", class: "speed"}, svg, speed(p));
+  const ends = [];
+  const cross = el("line", {y1: M.t - 6, y2: H - M.b, stroke: "var(--axis)", "stroke-dasharray": "3 3", visibility: "hidden"}, svg);
+  for (const [k, name, c] of SERIES) {
+    const sp = pts.filter(p => p.advisory_ms.fired_to_received[k] != null);
+    el("path", {d: sp.map((p, i) => (i ? "L" : "M") + X(p.events_per_s).toFixed(1) + "," + Y(p.advisory_ms.fired_to_received[k]).toFixed(1)).join(""),
+                fill: "none", stroke: c, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"}, svg);
+    for (const p of sp) el("circle", {cx: X(p.events_per_s), cy: Y(p.advisory_ms.fired_to_received[k]), r: 4,
+                                      fill: c, stroke: "var(--surface)", "stroke-width": 2}, svg);
+    const last = sp[sp.length - 1];
+    if (last) ends.push({name, x: X(last.events_per_s) + 8, y: Y(last.advisory_ms.fired_to_received[k]) + 4});
+  }
+  // direct labels at the line ends, pushed apart so they never overlap (top to bottom, min 14 px)
+  ends.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 14);
+  for (const e of ends) el("text", {x: e.x, y: e.y, class: "direct"}, svg, e.name);
+  // hover: nearest point by x, crosshair + tooltip with all percentiles
+  const tip = document.getElementById("tip"), box = document.getElementById("chart");
+  const hit = el("rect", {x: M.l, y: M.t - 20, width: W - M.l - M.r, height: H - M.t - M.b + 20, fill: "transparent"}, svg);
+  hit.addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect(), mx = (ev.clientX - r.left) / r.width * W;
+    let best = pts[0]; for (const p of pts) if (Math.abs(X(p.events_per_s) - mx) < Math.abs(X(best.events_per_s) - mx)) best = p;
+    const x = X(best.events_per_s); cross.setAttribute("x1", x); cross.setAttribute("x2", x); cross.setAttribute("visibility", "visible");
+    const t = best.advisory_ms.fired_to_received;
+    tip.innerHTML = `<b>${speed(best)} · ${Math.round(best.events_per_s).toLocaleString()} events/s</b>` +
+      SERIES.map(([k, n, c]) => `<div class="row"><span><i style="background:${c}"></i>${n}</span><span>${fmtMs(t[k])}</span></div>`).join("") +
+      `<div class="row"><span>max</span><span>${fmtMs(t.max)}</span></div><div class="row"><span>advisories</span><span>${best.advisories.toLocaleString()}</span></div>`;
+    tip.style.display = "block";
+    const px = x / W * r.width, tw = tip.offsetWidth;
+    tip.style.left = (px + 14 + tw > r.width ? px - tw - 14 : px + 14) + "px";
+    tip.style.top = "40px";
+  });
+  hit.addEventListener("mouseleave", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); });
+}
+const cols = [["speed", p => speed(p)], ["events/s", p => Math.round(p.events_per_s).toLocaleString()],
+  ["advisories", p => p.advisories.toLocaleString()],
+  ["total p50", p => fmtMs(p.advisory_ms.fired_to_received.p50)], ["total p95", p => fmtMs(p.advisory_ms.fired_to_received.p95)],
+  ["total p99", p => fmtMs(p.advisory_ms.fired_to_received.p99)], ["total max", p => fmtMs(p.advisory_ms.fired_to_received.max)],
+  ["fired→emitted p50", p => fmtMs(p.advisory_ms.fired_to_emitted.p50)], ["emitted→stored p50", p => fmtMs(p.advisory_ms.emitted_to_stored.p50)],
+  ["stored→received p50", p => fmtMs(p.advisory_ms.stored_to_received.p50)],
+  ["windows", p => p.window_ms.windows ? p.window_ms.windows.toLocaleString() : "–"], ["window p50", p => fmtMs(p.window_ms.p50)], ["window p99", p => fmtMs(p.window_ms.p99)]];
+const rows = [...DATA.points].sort((a, b) => a.events_per_s - b.events_per_s);
+document.getElementById("table").innerHTML = "<thead><tr>" + cols.map(([h]) => `<th>${h}</th>`).join("") + "</tr></thead><tbody>" +
+  rows.map(p => "<tr>" + cols.map(([, f]) => `<td>${f(p)}</td>`).join("") + "</tr>").join("") + "</tbody>";
+</script>
+</body></html>

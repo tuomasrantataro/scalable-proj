@@ -18,6 +18,11 @@ out-of-orderness bound (OUT_OF_ORDERNESS_S) plus however long the input takes to
   stop    Stops it, prints p50/p95/p99/max per stage and appends a summary to bench/results/advisory_latency.jsonl.
           Repeats (at-least-once delivery after a restart) count once, by (trader, symbol, window_end).
 
+The first window close after the job starts is reported separately ("cold start"): the job has just started
+(code not yet compiled by the JIT, connections being opened) and, with empty EMA state, every symbol's first
+window gives an initial BUY, so nearly all of that close's windows are advisories at once. Mixed in, it hides the
+steady state: in one run its windows took p50 541 ms (fired → emitted), the next close's 7 ms.
+
 Usage (repo root):
   python3 bench/advisory_latency.py start
   python3 bench/advisory_latency.py stop --label my-run
@@ -83,14 +88,23 @@ def summarize(lines):
             before_ready += 1  # stored before the consumer was reading: not received live
             continue
         fired, emitted, stored, received = epoch_ms(a["fired_at"]), epoch_ms(a["emitted_at"]), m["kafka_ts"], m["received_ms"]
-        rows.append({"fired_to_emitted": emitted - fired, "emitted_to_stored": stored - emitted,
-                     "stored_to_received": received - stored, "fired_to_received": received - fired})
+        rows.append({"window_end": a["window_end"], "fired_to_emitted": emitted - fired,
+                     "emitted_to_stored": stored - emitted, "stored_to_received": received - stored,
+                     "fired_to_received": received - fired})
+    first_close = min((r["window_end"] for r in rows), default=None)  # ISO local times sort as strings
+    steady = [r for r in rows if r["window_end"] != first_close]
+    cold = [r for r in rows if r["window_end"] == first_close]
+    return {"messages": len(steady), "repeats": repeats, "before_ready": before_ready,
+            "ts_types": sorted(ts_types), "ms": stage_stats(steady),
+            "cold_close": first_close, "cold_messages": len(cold), "cold_ms": stage_stats(cold)}
+
+
+def stage_stats(rows):
     stats = {}
     for key, _ in STAGES:
         vals = sorted(r[key] for r in rows)
         stats[key] = {q: percentile(vals, n) for q, n in (("p50", 50), ("p95", 95), ("p99", 99), ("max", 100))}
-    return {"messages": len(rows), "repeats": repeats, "before_ready": before_ready,
-            "ts_types": sorted(ts_types), "ms": stats}
+    return stats
 
 
 def stop(a):
@@ -98,7 +112,7 @@ def stop(a):
     out = compose("logs", "--no-log-prefix", "--no-color", SERVICE)
     compose("rm", "-sf", SERVICE)
     s = summarize(out.splitlines())
-    print(f"== advisory latency: {s['messages']} messages received live"
+    print(f"== advisory latency: {s['messages']} messages received live after the first window close"
           f" ({s['repeats']} repeats, {s['before_ready']} stored before the consumer started)", flush=True)
     if s["ts_types"] and s["ts_types"] != ["LogAppendTime"]:
         print(f"   WARNING: Kafka timestamp types {s['ts_types']}: the topic needs message.timestamp.type="
@@ -108,6 +122,10 @@ def stop(a):
         for key, name in STAGES:
             v = s["ms"][key]
             print(f"   {name:26} " + " ".join(f"{v[q]:8.0f}" for q in ("p50", "p95", "p99", "max")), flush=True)
+    if s["cold_messages"]:
+        c = s["cold_ms"]["fired_to_received"]
+        print(f"   cold start (first close, {s['cold_close']}): {s['cold_messages']} messages, fired → received "
+              f"p50 {c['p50']:.0f} ms, max {c['max']:.0f} ms (not included above)", flush=True)
     result = {"time": datetime.now(timezone.utc).isoformat(timespec="seconds"), "label": a.label, **s}
     RESULTS.parent.mkdir(exist_ok=True)
     with RESULTS.open("a") as f:

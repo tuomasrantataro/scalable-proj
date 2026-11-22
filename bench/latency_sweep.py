@@ -6,6 +6,10 @@ paced by the feed's own clock (column Time) at a speed-up factor: 1 = real time 
 in the default slice, over 4,000/s at the open), 10 = ten times faster, ... ; 0 = as fast as the producer can.
 The achieved input rate is measured, so the x-axis is events/s actually sent.
 
+Statistics leave out the first window close after the job starts (cold JVM, every symbol's initial BUY at
+once); it is recorded separately as cold_*. With warm EMAs advisories are rare (about 10-20 per close with every
+symbol subscribed), so the window latency over all windows (about 3,500 per close) is the larger sample.
+
 Per point: reset (fresh topic `sweep`, empty tables, `advisories` recreated), start the advisory consumer
 (bench/advisory_latency.py), start the job subscribed to every symbol (config/subscriptions-all.txt, so every
 BUY/SELL is a sample), replay the slice, wait until the job has processed it, then record
@@ -20,6 +24,7 @@ Usage (repo root; the data files are in --data-dir):
   python3 bench/latency_sweep.py                                   # speeds 1,3,10,30,100,300,max
   python3 bench/latency_sweep.py --speeds 10,30,100,300,0          # skip the slow real-time points
   python3 bench/latency_sweep.py --day 10 --start 15:25 --end 15:45  # another slice
+  python3 bench/latency_sweep.py --set JDBC_BATCH_SIZE=200 --name batch200   # any job setting from docker-compose.yml
   python3 bench/latency_sweep.py --chart bench/results/latency_sweep/<time>   # only redraw the chart
 """
 import argparse
@@ -39,11 +44,18 @@ TOPIC = "sweep"
 SUBSCRIPTIONS = "/config/subscriptions-all.txt"
 
 
-def window_latency():
-    """fired -> emitted over all windows of the run, in ms."""
+def advisory_count():
+    out = kafka("kafka-get-offsets.sh", "--topic advisories")
+    return sum(int(line.rsplit(":", 1)[1]) for line in out.split() if line.count(":") == 2)
+
+
+def window_latency(cold=False):
+    """fired -> emitted in ms, over the windows after the first window close (or, cold=True, of that close)."""
+    op = "=" if cold else ">"
     out = sql("SELECT count(*) || '|' || coalesce(array_to_string(percentile_cont(ARRAY[0.5, 0.95, 0.99]) "
               "WITHIN GROUP (ORDER BY ms), ','), '') || '|' || coalesce(max(ms)::text, '') FROM "
-              "(SELECT extract(epoch FROM emitted_at - fired_at) * 1000 AS ms FROM ema_window) t")
+              "(SELECT extract(epoch FROM emitted_at - fired_at) * 1000 AS ms FROM ema_window "
+              f"WHERE window_end {op} (SELECT min(window_end) FROM ema_window)) t")
     n, qs, mx = out.split("|")
     if int(n) == 0:
         return {"windows": 0}
@@ -61,7 +73,7 @@ def run_point(a, speed):
     reset()  # also recreates topic `sweep` (KAFKA_TOPIC) and `advisories`
     advisory_latency.start()
     start_job({"KAFKA_TOPIC": TOPIC, "KAFKA_GROUP": group, "SUBSCRIPTIONS_FILE": SUBSCRIPTIONS,
-               "TASKMANAGERS": str(a.taskmanagers), "PARALLELISM": str(a.parallelism)})
+               "TASKMANAGERS": str(a.taskmanagers), "PARALLELISM": str(a.parallelism), **a.settings})
 
     out = sh("docker compose run --rm --no-deps replay-producer", env={
         "DATA_DIR": a.data_dir, "KAFKA_TOPIC": TOPIC, "CSV_FILE": f"/data/{a.csv}", "RATE": "0",
@@ -78,7 +90,9 @@ def run_point(a, speed):
     last, last_change, t0 = None, time.time(), time.time()
     while True:
         time.sleep(3)
-        state = sql("SELECT count(*) || ' ' || (SELECT count(*) FROM data_issue) FROM ema_window")
+        # advisories too, in case a variant of the job does not write ema_window
+        state = (sql("SELECT count(*) || ' ' || (SELECT count(*) FROM data_issue) FROM ema_window") + " "
+                 + str(advisory_count()))
         if state != last:
             last, last_change = state, time.time()
         if group_lag(group, TOPIC) == 0 and time.time() - last_change >= a.stable:
@@ -87,14 +101,16 @@ def run_point(a, speed):
             sys.exit(f"timeout waiting for the job: output={state}")
 
     adv = advisory_latency.stop(argparse.Namespace(label=f"sweep {label} {group}"))
-    win = window_latency()
-    log(f"   windows fired -> emitted: n={win['windows']:,}"
-        + (f", p50 {win['p50']:.0f} ms, p99 {win['p99']:.0f} ms" if win["windows"] else ""))
+    win, cold = window_latency(), window_latency(cold=True)
+    log(f"   windows fired -> emitted after the first close: n={win['windows']:,}"
+        + (f", p50 {win['p50']:.0f} ms, p99 {win['p99']:.0f} ms" if win["windows"] else "")
+        + (f"; first close: n={cold['windows']:,}, p50 {cold['p50']:.0f} ms" if cold["windows"] else ""))
     return {"time": datetime.now(timezone.utc).isoformat(timespec="seconds"), "speedup": speed, "label": label,
-            "csv": a.csv, "start": a.start, "end": a.end, "taskmanagers": a.taskmanagers,
+            "name": a.name, "settings": a.settings, "csv": a.csv, "start": a.start, "end": a.end, "taskmanagers": a.taskmanagers,
             "parallelism": a.parallelism, "rows": rows, "send_s": round(active, 2), "events_per_s": round(rate),
             "advisories": adv["messages"], "advisory_repeats": adv["repeats"], "advisory_ms": adv["ms"],
-            "window_ms": win}
+            "window_ms": win, "cold_advisories": adv["cold_messages"], "cold_advisory_ms": adv["cold_ms"],
+            "cold_window_ms": cold}
 
 
 # --- chart -----------------------------------------------------------------------------------------------------
@@ -160,7 +176,8 @@ h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
 <div class="chart" id="chart"><div class="tip" id="tip"></div></div>
 <p class="notes">Latency = window fired (the watermark passed the window's end) → advisory received by a Kafka
 consumer. Both axes are logarithmic. Labels above the plot are the replay speed-up (1× = the feed's real pace).
-Each point replays the same slice into a fresh job, subscribed to every symbol.</p>
+Each point replays the same slice into a fresh job, subscribed to every symbol. The first window close after
+the job starts (cold start) is left out; it is in the table.</p>
 <h2>All measurements (ms)</h2>
 <div class="table-wrap"><table id="table"></table></div>
 </main>
@@ -174,7 +191,7 @@ const speed = p => p.label === "max" ? "max" : p.label.replace(/x$/, "×");
 const fmtMs = v => v == null ? "–" : v >= 1000 ? (v / 1000).toFixed(2) + " s" : Math.round(v) + " ms";
 const p0 = DATA.points[0];
 document.getElementById("sub").textContent = p0 ?
-  `${p0.csv}, ${p0.start}–${p0.end} · ${p0.taskmanagers} TaskManagers, parallelism ${p0.parallelism} · ${DATA.points.length} points` : "no points yet";
+  `${p0.name ? p0.name + " · " : ""}${Object.entries(p0.settings || {}).map(([k, v]) => k + "=" + v).join(" ")}${Object.keys(p0.settings || {}).length ? " · " : ""}${p0.csv}, ${p0.start}–${p0.end} · ${p0.taskmanagers} TaskManagers, parallelism ${p0.parallelism} · ${DATA.points.length} points` : "no points yet";
 document.getElementById("legend").innerHTML = SERIES.map(([, n, c]) => `<span><i style="background:${c}"></i>${n}</span>`).join("");
 
 const W = 900, H = 420, M = {l: 56, r: 48, t: 34, b: 44};
@@ -243,7 +260,8 @@ const cols = [["speed", p => speed(p)], ["events/s", p => Math.round(p.events_pe
   ["total p99", p => fmtMs(p.advisory_ms.fired_to_received.p99)], ["total max", p => fmtMs(p.advisory_ms.fired_to_received.max)],
   ["fired→emitted p50", p => fmtMs(p.advisory_ms.fired_to_emitted.p50)], ["emitted→stored p50", p => fmtMs(p.advisory_ms.emitted_to_stored.p50)],
   ["stored→received p50", p => fmtMs(p.advisory_ms.stored_to_received.p50)],
-  ["windows", p => p.window_ms.windows.toLocaleString()], ["window p50", p => fmtMs(p.window_ms.p50)], ["window p99", p => fmtMs(p.window_ms.p99)]];
+  ["cold start p50", p => p.cold_advisory_ms ? fmtMs(p.cold_advisory_ms.fired_to_received.p50) : "–"],
+  ["windows", p => p.window_ms.windows ? p.window_ms.windows.toLocaleString() : "–"], ["window p50", p => fmtMs(p.window_ms.p50)], ["window p99", p => fmtMs(p.window_ms.p99)]];
 const rows = [...DATA.points].sort((a, b) => a.events_per_s - b.events_per_s);
 document.getElementById("table").innerHTML = "<thead><tr>" + cols.map(([h]) => `<th>${h}</th>`).join("") + "</tr></thead><tbody>" +
   rows.map(p => "<tr>" + cols.map(([, f]) => `<td>${f(p)}</td>`).join("") + "</tr>").join("") + "</tbody>";
@@ -269,6 +287,9 @@ def main():
     ap.add_argument("--taskmanagers", type=int, default=4)
     ap.add_argument("--parallelism", type=int, default=4)
     ap.add_argument("--stable", type=int, default=15, help="seconds without output change that end a point")
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="job setting from docker-compose.yml, e.g. JDBC_BATCH_SIZE=200 (repeatable)")
+    ap.add_argument("--name", default="", help="name of this sweep (stored with the results, in the directory name)")
     ap.add_argument("--chart", metavar="DIR", help="only redraw latency.html from DIR/results.jsonl")
     a = ap.parse_args()
     if a.chart:
@@ -278,9 +299,11 @@ def main():
     if not (Path(a.data_dir) / a.csv).is_file():
         sys.exit(f"missing {Path(a.data_dir) / a.csv}")
     speeds = [float(s) for s in a.speeds.split(",")]
+    a.settings = dict(kv.split("=", 1) for kv in a.set)
 
     os.environ["KAFKA_TOPIC"] = TOPIC  # for reset(): kafka-setup creates this topic
-    out_dir = ROOT / "bench" / "results" / "latency_sweep" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    out_dir = ROOT / "bench" / "results" / "latency_sweep" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                                                              + (f"-{a.name}" if a.name else ""))
     out_dir.mkdir(parents=True)
     sh("docker compose build kafka-setup jobmanager")
     sh("docker compose up -d --wait kafka timescaledb")

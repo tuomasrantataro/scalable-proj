@@ -45,7 +45,7 @@ import static scalable.flink.TradingJob.withIdlenessAndAlignment;
  *     → keyBy(symbol) → 5-min tumbling event-time window: close, ticks     │
  *         └─(late events)─────────────────────────────────────────────────┤
  *     → keyBy(symbol) → EmaFunction (keyed EmaState) ──(price jumps)───────┤
- *     ├→ JdbcSink: ema_window (upsert on symbol, window_end)                → JdbcSink: data_issue
+ *     ├→ JdbcSink: ema_window (upsert on symbol, window_end; own task)       → JdbcSink: data_issue
  *     └→ advisories only (BUY/SELL) → SubscriptionFilter: one copy per subscribed trader
  *          → KafkaSink: topic `advisories` (key symbol, JSON value; one record per trader and advisory)
  * </pre>
@@ -127,6 +127,9 @@ public final class EmaPipeline {
                 .union(windows.getSideOutput(LATE).map(new LateToIssue()).name("late-events"),
                         emas.getSideOutput(EmaFunction.ISSUES));
 
+        // Own task (not chained to the EMA function): the JDBC sink upserts synchronously in batches, and chained it
+        // blocked the EMA thread, so closed windows queued behind each batch. Unchained, window close → advisory
+        // received stayed under ~100 ms at every input rate; chained, p95 reached 628 ms (MEASUREMENTS.md §6).
         emas.sinkTo(jdbcSink(UPSERT_EMA, (ps, r) -> {
             ps.setString(1, r.symbol);
             ps.setString(2, r.secType);
@@ -147,7 +150,7 @@ public final class EmaPipeline {
             ps.setBoolean(13, r.initial);
             ps.setObject(14, ts(r.firedAt));
             ps.setObject(15, ts(r.emittedAt));
-        })).name("timescaledb-ema");
+        })).name("timescaledb-ema").disableChaining();
 
         // Query 2 output (FR-15, FR-16): each advisory is sent as soon as its window is evaluated (linger.ms=0).
         // Key = symbol, so all advisories of a symbol go to one partition, in window order.

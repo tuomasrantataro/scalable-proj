@@ -181,6 +181,125 @@ the time), averaged over subtasks.
   inside one JVM instead of being serialized and sent over the network between containers (not verified).
 - Each configuration ran once (the no-alignment runs show ±7% between runs at parallelism 4).
 
+## 6. Advisory latency: from window close to a trader's system
+
+Date: 2026-11-22. Same host and setup as above.
+
+### Method
+
+Each advisory carries two wall-clock stamps from the job and gets two more on the way; all four come from the same
+host clock (every container runs on one machine):
+
+| Stamp | Set by | Where it is |
+|---|---|---|
+| `fired_at` | `ClosePrice.ToPriceWindow`, when the 5-min window fires (the watermark passed its end) | advisory JSON, `ema_window.fired_at` |
+| `emitted_at` | `EmaFunction`, when the EMA result is produced | advisory JSON, `ema_window.emitted_at` |
+| stored | the broker, when it appends the record (topic `advisories` uses `LogAppendTime`) | Kafka record timestamp |
+| received | the `advisory-latency` service (producer-rs, mode `latency`), a consumer standing in for a trader's system | its output, read by [`bench/advisory_latency.py`](bench/advisory_latency.py) |
+
+Latency is reported as p50/p95/p99/max per stage and in total (`fired_at` → received). It starts when the job
+considers the window ended, which in market time is at least `OUT_OF_ORDERNESS_S` (60 s) after the window's end.
+The time from an event's arrival to the window firing is not covered (needs the planned ingestion timestamp).
+
+[`bench/latency_sweep.py`](bench/latency_sweep.py) measures it against load: every point replays the same slice
+(8 Nov, 09:00–09:30, 3.9 M rows, 6 window closes) into a fresh job, paced by the feed's own `Time` column at a
+speed-up (`SPEEDUP`; 1× = real time, about 2,200 events/s in this slice, over 4,000/s at the open), with every
+symbol subscribed (`config/subscriptions-all.txt`) so every BUY/SELL is a sample. Each configuration ran once.
+
+### Fix: advisories expired minutes after they were written
+
+Flink's Kafka sink gives each record the Flink record's timestamp, which for window results is the event time
+(2021). With the topic's default `CreateTime` and 7-day retention, the broker deleted every advisory at its next
+retention check, about a minute after writing it (broker log: `Deleting segment ... due to log retention time
+604800000ms breach`, `largestRecordTimestamp=1636362299999`). A trader's system that connected later received
+nothing, and the record timestamp said nothing about delivery. `kafka-setup` now creates `advisories` with
+`message.timestamp.type=LogAppendTime` (and sets it on an existing topic). After the fix all 73 advisories of the
+week were still in the topic after the run.
+
+### Finding: the first window close after a job start dominated the first measurements
+
+The first sweeps reported ~250–400 ms p50 even at low load, in every configuration. Split by window close, the
+cause was the first close after the job starts:
+
+| Window close (10-min slice, sink unchained, 10×) | Windows | Advisories (all "initial") | fired → emitted p50 | max |
+|---|---|---|---|---|
+| 09:05, first after the job start | 3,652 | 3,652 | 541 ms | 704 ms |
+| 09:10 | 3,267 | 135 | **7 ms** | **25 ms** |
+
+With empty EMA state, every symbol's first window gives an initial BUY, so the first close sends ~3,650 advisories
+at once from a job that has just started (code not yet JIT-compiled, connections being opened). That one burst
+was 96% of the samples. The scripts now leave out the first window close after a job start and report it
+separately as cold start (`cold_*` in the results).
+
+The earlier whole-system runs included that first close too: the full-week backlog run gave 771 ms p50 and the
+live run (`scripts/run-live.sh`, producer at full speed) 318 ms p50, both over the 73 advisories of the normal
+subscriptions.
+
+### Experiments: where the time goes
+
+Four candidate causes were tested with switches in the job (removed afterwards; see below):
+
+| Switch | What it changed |
+|---|---|
+| sink unchained | the `ema_window` JDBC sink in its own task (`disableChaining()`) instead of running in the EMA function's thread |
+| buffer timeout 5 ms | `env.setBufferTimeout(5)`: partly filled network buffers flushed every 5 ms instead of Flink's default 100 ms |
+| no `ema_window` sink | the rows went to a `DiscardingSink` instead of TimescaleDB |
+| unchained + 5 ms | both |
+
+First round, 10-min slice, first close **included** (so mostly the cold start), window close → received,
+p50 / p99 (ms):
+
+| Configuration | 10× | 100× | max |
+|---|---|---|---|
+| baseline | 257 / 396 | 338 / 401 | 1,097 / 1,386 |
+| sink unchained | 253 / 371 | 331 / 591 | 471 / 626 |
+| buffer timeout 5 ms | 310 / 872 | 515 / 795 | 577 / 1,462 |
+| no `ema_window` sink | 265 / 367 | 345 / 474 | 619 / 846 |
+| unchained + 5 ms | 330 / 461 | 349 / 515 | 556 / 740 |
+
+Second round, 30-min slice, first close **left out** (260 advisories and 16,202 windows per point):
+
+| Speed (input rate) | Window close → received, p50 / p95 / max (ms): baseline | sink unchained |
+|---|---|---|
+| 10× (34 k events/s) | 12 / 39 / 92 | 11 / 46 / 109 |
+| 100× (152 k events/s) | 6 / 222 / 237 | 8 / 21 / 96 |
+| max (~540 k events/s) | 49 / 628 / 718 | 26 / 64 / 103 |
+
+| Speed | Window close → EMA result over all windows, p50 / p99 (ms): baseline | sink unchained |
+|---|---|---|
+| 10× | 4 / 91 | 3 / 106 |
+| 100× | 3 / 220 | 3 / 95 |
+| max | 18 / 709 | 10 / 91 |
+
+Per stage (second round, both configurations): EMA result → stored in Kafka p50 2–7 ms (max 39 ms), stored →
+received p50 1–4 ms (max 14 ms). Cold start (the first close, left out above): 300–620 ms p50 chained, 310–480
+ms unchained.
+
+- **The computation is not the cost.** A window close is ~3,500 windows of a few floating-point operations each
+  (two EMA updates and a comparison), microseconds of work; the median window took 3–4 ms from close to EMA result.
+- **The JDBC sink in the EMA thread made the tail.** It upserts synchronously in batches of up to 1,000 rows, and
+  chained it blocked the EMA function, so closed windows queued behind each batch: p95 grew from 39 ms to 628 ms
+  with the input rate. In its own task the tail stayed around 100 ms up to the maximum rate.
+- **A shorter buffer timeout did not help**; it was the same or worse, possibly from the extra flushes.
+- **Kafka delivery is a few ms** in every configuration.
+- **Change:** the `ema_window` sink now runs in its own task by default (`EmaPipeline`, `.disableChaining()`).
+
+The switches were environment variables read by a small class in the job (`EXP_EMA_SINK=unchained|discard`,
+`EXP_BUFFER_TIMEOUT_MS`), passed through `docker-compose.yml` and set with `bench/latency_sweep.py --set`. To repeat
+an experiment, apply the change from the table above in `EmaPipeline` and run the sweep with `--name`. Raw
+results: `bench/results/latency_sweep/*-exp-*` (first round), `*-exp2-*` (second round), each with
+`results.jsonl` and a chart (`latency.html`).
+
+Check after the change (switches removed, sink unchained in the code), same sweep, window close → received
+p50 / p95 / max: 10× 10 / 56 / 99 ms, 100× 11 / 24 / 66 ms, max 32 / 228 / 232 ms (windows p99 at max: 198 ms,
+vs 709 ms chained). The max point's tail varies between single runs (64 vs 228 ms p95). The full-week backlog run
+gave the reference digest `19413a50…` and drained in 128.3 s (140.6 and 151.6 s in the last two runs with the sink
+chained). At its read rate of ~2.25 M events/s, about 4× the sweep's maximum, the job falls behind: its 72
+advisories after the first close took p50 590 ms, max 1.33 s.
+
+Not measured yet: the real-time point (1×) and other speeds than 10×/100×/max on the 30-min slice (the default
+sweep, about an hour), repeated runs, and latency from an event's arrival to the window firing.
+
 ## Caveats
 
 - Everything runs on one laptop, so producer, Kafka, Flink and TimescaleDB compete for the same 16 threads.

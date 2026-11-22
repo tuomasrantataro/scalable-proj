@@ -186,7 +186,7 @@ Limits: scaling is bounded by a single host's resources. The Kafka setup is a si
 |---|---|
 | Correctness | Run the pandas reference implementation on the same data. Compare EMA values (with a tolerance) and the exact set of advisories per symbol. |
 | Throughput | Load the week into Kafka once, then replay the stored backlog into the job (`bench/backlog.py`), so the producer is not part of the measurement: full-week time, read rate, busy time per task. Live runs (producer at max rate) with the Kafka consumer lag show whether the job keeps up. |
-| Latency | From the end of a window to a trader's system receiving the advisory (`bench/advisory_latency.py`, run by `bench/backlog.py run` and `scripts/run-live.sh`): `fired_at` (wall clock when the window fired, i.e. the watermark passed its end) → `emitted_at` (EMA function) → Kafka append time (topic `advisories` uses `LogAppendTime`) → receive time in a consumer (`advisory-latency` service). p50, p95, p99, max per stage. Not yet covered: the time from an event's ingestion to the window firing (needs the planned ingestion timestamp, §3.7). |
+| Latency | From the end of a window to a trader's system receiving the advisory (`bench/advisory_latency.py`, run by `bench/backlog.py run` and `scripts/run-live.sh`): `fired_at` (wall clock when the window fired, i.e. the watermark passed its end) → `emitted_at` (EMA function) → Kafka append time (topic `advisories` uses `LogAppendTime`) → receive time in a consumer (`advisory-latency` service). p50, p95, p99, max per stage. Not yet covered: the time from an event's ingestion to the window firing (needs the planned ingestion timestamp, §3.7). Load/latency curve: `bench/latency_sweep.py`; results and the experiments that moved the `ema_window` sink into its own task: [`MEASUREMENTS.md`](../MEASUREMENTS.md) §6. |
 | Scalability | Vary the TaskManager count (1, 2, 4, …) and the Kafka partition count. Vary the input: one exchange vs. all three, and replay speed-up. |
 | Resource use | CPU and memory per container (cAdvisor), Flink busy time and backpressure. |
 | Long tail | Per-subtask record counts and busy time, to show the load balance under skew. |
@@ -216,7 +216,7 @@ docker-compose.yml   kafka, kafka-setup, timescaledb, db-setup, jobmanager, task
 MEASUREMENTS.md      measurements with Kafka (producer, full week, bottleneck, JDBC sink and failover)
 producer-rs/         replay producer + kafka-setup + advisory latency consumer (Rust, rdkafka, Cargo, Dockerfile)
 flink-job/           Flink application (ema/: EMA, advisories, data quality; unit tests in src/test)
-bench/               benchmark scripts (backlog.py, advisory_latency.py)
+bench/               benchmark scripts (backlog.py, advisory_latency.py, latency_sweep.py)
 docs/                requirements, architecture, report; iggy.md (the earlier Iggy setup: tests, measurements,
                      why it was replaced); figures/reference/ (reference result plots)
 reference/           pandas reference implementation, unit tests, plots
