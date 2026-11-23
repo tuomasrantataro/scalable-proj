@@ -2,7 +2,8 @@
 //!
 //! Modes: `setup` (create the topics `ticks` and `advisories`), `replay` (send CSV rows to `ticks`) and
 //! `latency` (read `advisories` like a trader's system would and print one JSON line per message with its
-//! receive time, for bench/advisory_latency.py).
+//! receive time, for bench/advisory_latency.py; with LATENCY_OUTPUT=summary it aggregates instead, for
+//! bench/measure.py, where a line per message would make the consumer the bottleneck).
 //! Each row is one record: key = symbol ID, value = the CSV row. The partition is chosen here, as Java's
 //! `String.hashCode()` of the symbol floor-mod the partition count (the partitioning used since the first
 //! producer), so all rows of a symbol go to one partition in file order. librdkafka batches and compresses
@@ -14,10 +15,13 @@
 //! librdkafka reads the monotonic clock for every record (enqueue time), and on a host whose clock source is
 //! HPET each read is a ~1.4 us system call: one thread then sends only ~250k records/s (MEASUREMENTS.md).
 
-use std::collections::HashSet;
+mod feed;
+
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::BufReader;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::mpsc::{Receiver, sync_channel};
 use std::time::{Duration, Instant};
@@ -31,6 +35,8 @@ use rdkafka::message::{DeliveryResult, Message, Timestamp};
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer, ProducerContext};
 use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
 use rdkafka::util::Timeout;
+
+use feed::{FeedClock, clock_ms, read_row};
 
 type Res<T> = Result<T, Box<dyn Error>>;
 
@@ -46,15 +52,17 @@ struct Config {
     csv_file: String,
     repeat: u32,
     rate: u64,
-    /// Replay at this multiple of the feed's own pace (the `Time` column; 1 = real time). 0 = off.
+    /// Replay at this multiple of the feed's own pace (feed.rs; 1 = real time). 0 = off.
     speedup: f64,
-    /// Only rows whose `Time` is in [start_time, end_time), in ms since midnight (`START_TIME`/`END_TIME`, HH:MM).
+    /// Only rows the feed delivered in [start_time, end_time), in ms since midnight (`START_TIME`/`END_TIME`, HH:MM).
     start_time: Option<i64>,
     end_time: Option<i64>,
     compression: String,
     linger_ms: String,
     batch_bytes: String,
     threads: usize,
+    /// Replace the symbols by this many equally frequent ones (bench/backlog.py --workload uniform). 0 = off.
+    uniform_symbols: u64,
 }
 
 impl Config {
@@ -76,6 +84,7 @@ impl Config {
             linger_ms: env("KAFKA_LINGER_MS", "20"),
             batch_bytes: env("KAFKA_BATCH_BYTES", "1000000"),
             threads: env("PRODUCER_THREADS", "8").parse()?,
+            uniform_symbols: env("UNIFORM_SYMBOLS", "0").parse()?,
         })
     }
 }
@@ -95,32 +104,6 @@ fn clock_env(key: &str) -> Res<Option<i64>> {
     }
     let full = if v.len() == 5 { format!("{v}:00") } else { v.clone() };
     clock_ms(full.as_bytes()).map(Some).ok_or_else(|| format!("{key}={v}: expected HH:MM").into())
-}
-
-/// "HH:MM:SS" or "HH:MM:SS.mmm" → ms since midnight.
-fn clock_ms(t: &[u8]) -> Option<i64> {
-    let num = |b: &[u8]| -> Option<i64> {
-        if b.is_empty() || !b.iter().all(u8::is_ascii_digit) {
-            return None;
-        }
-        std::str::from_utf8(b).ok()?.parse().ok()
-    };
-    if t.len() < 8 || t[2] != b':' || t[5] != b':' {
-        return None;
-    }
-    let (h, m, sec) = (num(&t[0..2])?, num(&t[3..5])?, num(&t[6..8])?);
-    let ms = match t.get(8) {
-        Some(b'.') => num(&t[9..])? * 10i64.pow(3u32.saturating_sub((t.len() - 9) as u32)),
-        None => 0,
-        _ => return None,
-    };
-    Some(((h * 60 + m) * 60 + sec) * 1000 + ms)
-}
-
-/// The `Time` column (4th field: ID,SecType,Date,Time,...) of a CSV row, in ms since midnight.
-fn row_time(line: &[u8]) -> Option<i64> {
-    let mut fields = line.split(|&b| b == b',');
-    clock_ms(fields.nth(3)?)
 }
 
 macro_rules! log {
@@ -276,7 +259,7 @@ fn replay(cfg: &Config) -> Res<()> {
 }
 
 /// Reads the CSV file `repeat` times and hands rows, grouped by sender thread, to `hand_over`.
-/// Returns (rows read, distinct symbols).
+/// Returns (rows read, distinct symbols, seconds from the first to the last row).
 fn read_rows(
     cfg: &Config,
     partitions: i32,
@@ -287,10 +270,11 @@ fn read_rows(
     let mut chunks: Vec<Chunk> = (0..threads).map(|_| Vec::with_capacity(CHUNK)).collect();
     let mut read: u64 = 0;
     let mut symbols: HashSet<Vec<u8>> = HashSet::new();
-    let filtered = cfg.start_time.is_some() || cfg.end_time.is_some();
-    let mut first_time: Option<i64> = None; // feed time of the first row sent, for SPEEDUP
+    let paced = cfg.speedup > 0.0;
+    let needs_clock = paced || cfg.start_time.is_some() || cfg.end_time.is_some();
+    let (mut price_rows, mut other_rows) = (0u64, 0u64); // only counted for uniform_symbols
     let mut first_sent: Option<Instant> = None;
-    let mut last_sent = start;
+    let mut now = start; // last reading of the clock, for pacing
     let mut flush = |chunks: &mut Vec<Chunk>| -> Res<()> {
         for (t, c) in chunks.iter_mut().enumerate() {
             if !c.is_empty() {
@@ -301,40 +285,41 @@ fn read_rows(
     };
     for _ in 0..cfg.repeat {
         let mut reader = BufReader::with_capacity(1 << 20, File::open(&cfg.csv_file)?);
+        let mut feed = needs_clock.then(FeedClock::default);
+        let mut origin: Option<(i64, Instant)> = None; // feed time and send time of the first row of this pass
         loop {
-            let mut line = Vec::with_capacity(128);
-            if reader.read_until(b'\n', &mut line)? == 0 {
-                break;
-            }
-            // strip "\n" / "\r\n", like Java's readLine()
-            while matches!(line.last(), Some(b'\n' | b'\r')) {
-                line.pop();
-            }
-            // DEBS files: '#' comment lines (licence, column descriptions) and the "ID,SecType,..." header
-            if line.iter().all(u8::is_ascii_whitespace) || line.starts_with(b"#") || line.starts_with(b"ID,") {
+            let next = match feed.as_mut() {
+                Some(clock) => clock.next_row(&mut reader)?,
+                None => read_row(&mut reader)?.map(|line| (line, 0)),
+            };
+            let Some((mut line, feed_time)) = next else { break };
+            if cfg.start_time.is_some_and(|s| feed_time < s) {
                 continue;
             }
-            if filtered || cfg.speedup > 0.0 {
-                let t = row_time(&line);
-                if filtered {
-                    let Some(t) = t else { continue };
-                    if cfg.start_time.is_some_and(|s| t < s) || cfg.end_time.is_some_and(|e| t >= e) {
-                        continue;
-                    }
+            if cfg.end_time.is_some_and(|e| feed_time >= e) {
+                break; // feed times never decrease
+            }
+            if paced {
+                // A row is due (feed time since the first row) / speedup after the first row. The clock is read
+                // only for rows not yet due at the last reading (~1.4 us per read on HPET hosts). Rows already
+                // buffered are handed over before waiting, so nothing sits in a chunk while we sleep.
+                let (first, from) = *origin.get_or_insert_with(|| (feed_time, Instant::now()));
+                let due = from + Duration::from_secs_f64((feed_time - first) as f64 / 1000.0 / cfg.speedup);
+                if due > now {
+                    now = Instant::now();
                 }
-                // Paced by the feed's own clock: a row is due (t - first) / speedup after the start. Rows
-                // already buffered are handed over before waiting, so nothing sits in a chunk while we sleep.
-                if let (Some(t), true) = (t, cfg.speedup > 0.0) {
-                    let first = *first_time.get_or_insert(t);
-                    let paced_from = *first_sent.get_or_insert_with(Instant::now);
-                    let due = paced_from + Duration::from_secs_f64((t - first).max(0) as f64 / 1000.0 / cfg.speedup);
-                    let now = Instant::now();
-                    last_sent = now.max(due);
-                    if due > now + Duration::from_millis(1) {
-                        flush(&mut chunks)?;
-                        std::thread::sleep(due - now);
-                    }
+                if due > now + Duration::from_millis(1) {
+                    flush(&mut chunks)?;
+                    std::thread::sleep(due - now);
+                    now = Instant::now();
                 }
+            }
+            first_sent.get_or_insert_with(Instant::now);
+            if cfg.uniform_symbols > 0 {
+                // counted separately, so price events are spread evenly too
+                let n = if is_price_row(&line) { &mut price_rows } else { &mut other_rows };
+                line = with_symbol(&line, *n % cfg.uniform_symbols);
+                *n += 1;
             }
             let symbol_len = line.iter().position(|&b| b == b',').unwrap_or(line.len());
             let symbol = &line[..symbol_len];
@@ -344,22 +329,28 @@ fn read_rows(
             let p = java_string_hash(symbol).rem_euclid(partitions);
             chunks[p as usize % threads].push((p, symbol_len, line));
             read += 1;
-            first_sent.get_or_insert_with(Instant::now);
             if read % CHUNK as u64 == 0 {
                 flush(&mut chunks)?;
-                // the clock is read per chunk, not per row (~1.4 us per read on HPET hosts); paced rows set it above
-                if cfg.speedup <= 0.0 {
-                    last_sent = Instant::now();
-                }
                 pace(start, read, cfg.rate);
             }
         }
     }
     flush(&mut chunks)?;
-    // Without a time filter or pacing, rows are sent until the end of the file
-    let last = if filtered || cfg.speedup > 0.0 { last_sent } else { Instant::now() };
-    let active = first_sent.map_or(0.0, |f| last.saturating_duration_since(f).as_secs_f64());
+    let active = first_sent.map_or(0.0, |f| f.elapsed().as_secs_f64());
     Ok((read, symbols.len(), active))
+}
+
+/// Whether column `Last` (22nd field) is set.
+fn is_price_row(line: &[u8]) -> bool {
+    line.split(|&b| b == b',').nth(21).is_some_and(|last| !last.trim_ascii().is_empty())
+}
+
+/// The row with its symbol replaced by the n-th artificial one.
+fn with_symbol(line: &[u8], n: u64) -> Vec<u8> {
+    let rest = line.iter().position(|&b| b == b',').unwrap_or(line.len());
+    let mut out = format!("U{n:05}.FR").into_bytes();
+    out.extend_from_slice(&line[rest..]);
+    out
 }
 
 /// Sender thread: enqueues each row as a record of its partition, in the order received.
@@ -392,6 +383,8 @@ fn send_rows(producer: &BaseProducer<Deliveries>, topic: &str, rx: Receiver<Chun
 /// Reads every partition of the advisories topic from the start, without a consumer group (no rebalance delay),
 /// and prints one JSON line per message: receive time, the broker's timestamp and the advisory itself. Starts
 /// with a `{"ready_ms":...}` line: messages stored before it were not received live. Runs until stopped.
+/// With LATENCY_OUTPUT=summary it prints a cumulative `{"summary":...}` line instead, whenever new messages
+/// have arrived and then none for `IDLE_POLLS` seconds, so printing never competes with receiving.
 fn latency(cfg: &Config) -> Res<()> {
     let consumer: BaseConsumer = ClientConfig::new()
         .set("bootstrap.servers", &cfg.bootstrap)
@@ -410,9 +403,24 @@ fn latency(cfg: &Config) -> Res<()> {
     }
     consumer.assign(&tpl)?;
     eprintln!("[advisory-latency] reading {} partitions of {}", t.partitions().len(), cfg.advisories_topic);
-    println!("{{\"ready_ms\":{}}}", now_ms());
+    let ready = now_ms();
+    println!("{{\"ready_ms\":{ready}}}");
+    let mut summary = match env("LATENCY_OUTPUT", "messages").as_str() {
+        "messages" => None,
+        "summary" => Some(Summary::new(ready)),
+        other => return Err(format!("LATENCY_OUTPUT={other}: expected messages or summary").into()),
+    };
+    let mut idle = 0;
     loop {
-        let Some(m) = consumer.poll(Duration::from_secs(1)) else { continue };
+        let Some(m) = consumer.poll(Duration::from_secs(1)) else {
+            idle += 1;
+            if let Some(s) = summary.as_mut().filter(|s| s.dirty && idle >= IDLE_POLLS) {
+                s.dirty = false;
+                println!("{}", s.json());
+            }
+            continue;
+        };
+        idle = 0;
         let m = m?;
         let received = now_ms();
         let (ts_type, ts) = match m.timestamp() {
@@ -421,6 +429,10 @@ fn latency(cfg: &Config) -> Res<()> {
             Timestamp::NotAvailable => ("none", -1),
         };
         let payload = std::str::from_utf8(m.payload().unwrap_or_default()).unwrap_or("null");
+        if let Some(s) = summary.as_mut() {
+            s.add(received, ts_type, ts, payload);
+            continue;
+        }
         // stdout is line-buffered, so each line is out as soon as it is written
         println!(
             "{{\"received_ms\":{received},\"kafka_ts\":{ts},\"ts_type\":\"{ts_type}\",\"partition\":{},\"offset\":{},\"advisory\":{payload}}}",
@@ -428,6 +440,134 @@ fn latency(cfg: &Config) -> Res<()> {
             m.offset()
         );
     }
+}
+
+/// Seconds without a message before a summary is printed. Shorter than the scripts wait for a stable output.
+const IDLE_POLLS: u32 = 3;
+
+/// Same stages and rules as bench/advisory_latency.py: repeats count once, messages stored before the consumer
+/// was ready have no latency, and the first window close after the job start (cold start) is kept apart.
+const STAGES: [&str; 4] = ["fired_to_emitted", "emitted_to_stored", "stored_to_received", "fired_to_received"];
+
+struct Summary {
+    ready: i64,
+    dirty: bool,
+    read: u64,
+    unparsed: u64,
+    repeats: u64,
+    before_ready: u64,
+    /// Hashes of (trader, symbol, window_end)
+    seen: HashSet<u64>,
+    traders: HashSet<String>,
+    ts_types: BTreeSet<&'static str>,
+    /// Messages per wall-clock second
+    per_second: HashMap<i64, u64>,
+    /// window_end (ISO local time, so it sorts as a string) → latencies in ms per stage
+    closes: BTreeMap<String, [Vec<i64>; 4]>,
+}
+
+impl Summary {
+    fn new(ready: i64) -> Self {
+        Self {
+            ready,
+            dirty: false,
+            read: 0,
+            unparsed: 0,
+            repeats: 0,
+            before_ready: 0,
+            seen: HashSet::new(),
+            traders: HashSet::new(),
+            ts_types: BTreeSet::new(),
+            per_second: HashMap::new(),
+            closes: BTreeMap::new(),
+        }
+    }
+
+    fn add(&mut self, received: i64, ts_type: &'static str, stored: i64, advisory: &str) {
+        self.dirty = true;
+        self.read += 1;
+        self.ts_types.insert(ts_type);
+        *self.per_second.entry(received.div_euclid(1000)).or_default() += 1;
+        let field = |key| json_str(advisory, key);
+        let instant = |key| field(key).and_then(instant_ms);
+        let (Some(trader), Some(symbol), Some(end), Some(fired), Some(emitted)) =
+            (field("trader"), field("symbol"), field("window_end"), instant("fired_at"), instant("emitted_at"))
+        else {
+            self.unparsed += 1;
+            return;
+        };
+        let mut h = DefaultHasher::new();
+        (trader, symbol, end).hash(&mut h);
+        if !self.seen.insert(h.finish()) {
+            self.repeats += 1;
+            return;
+        }
+        if !self.traders.contains(trader) {
+            self.traders.insert(trader.to_string());
+        }
+        if stored < self.ready {
+            self.before_ready += 1;
+            return;
+        }
+        if !self.closes.contains_key(end) {
+            self.closes.insert(end.to_string(), Default::default());
+        }
+        let stages = self.closes.get_mut(end).expect("inserted above");
+        for (v, ms) in stages.iter_mut().zip([emitted - fired, stored - emitted, received - stored, received - fired]) {
+            v.push(ms);
+        }
+    }
+
+    fn json(&self) -> String {
+        let first = self.closes.keys().next().cloned();
+        let part = |cold: bool| {
+            let closes: Vec<_> = self.closes.iter().filter(|(k, _)| (Some(*k) == first.as_ref()) == cold).collect();
+            let messages: usize = closes.iter().map(|(_, s)| s[0].len()).sum();
+            let stages: Vec<String> = (0..STAGES.len())
+                .map(|i| {
+                    let mut v: Vec<i64> = closes.iter().flat_map(|(_, s)| s[i].iter().copied()).collect();
+                    v.sort_unstable();
+                    let q = |p: f64| percentile(&v, p).map_or("null".to_string(), |x| x.to_string());
+                    format!(
+                        "\"{}\":{{\"p50\":{},\"p95\":{},\"p99\":{},\"max\":{}}}",
+                        STAGES[i], q(50.0), q(95.0), q(99.0), q(100.0)
+                    )
+                })
+                .collect();
+            format!("{{\"closes\":{},\"messages\":{messages},\"ms\":{{{}}}}}", closes.len(), stages.join(","))
+        };
+        let ts_types: Vec<String> = self.ts_types.iter().map(|t| format!("\"{t}\"")).collect();
+        format!(
+            "{{\"summary\":{{\"read\":{},\"distinct\":{},\"repeats\":{},\"unparsed\":{},\"before_ready\":{},\"traders\":{},\"ts_types\":[{}],\"max_per_s\":{},\"steady\":{},\"cold\":{}}}}}",
+            self.read, self.seen.len(), self.repeats, self.unparsed, self.before_ready, self.traders.len(),
+            ts_types.join(","), self.per_second.values().max().copied().unwrap_or(0), part(false), part(true)
+        )
+    }
+}
+
+/// Nearest-rank percentile of sorted values.
+fn percentile(sorted: &[i64], p: f64) -> Option<i64> {
+    let rank = (p / 100.0 * sorted.len() as f64).ceil() as usize;
+    sorted.get(rank.max(1) - 1).copied()
+}
+
+/// Value of a string field of the flat advisory JSON (AdvisorySerializer). The fields read here (names,
+/// times) never contain escapes, so no JSON library is needed.
+fn json_str<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    let start = json.find(&format!("\"{key}\":\""))? + key.len() + 4;
+    let len = json[start..].find('"')?;
+    Some(&json[start..start + len])
+}
+
+/// Java `Instant.toString()` with at most milliseconds ("2026-11-22T21:56:09.123Z") → epoch ms.
+fn instant_ms(s: &str) -> Option<i64> {
+    let (date, time) = s.strip_suffix('Z')?.split_once('T')?;
+    let mut d = date.split('-').map(|x| x.parse::<i64>().ok());
+    let (y, m, day) = (d.next()??, d.next()??, d.next()??);
+    // days since 1970-01-01, counting years from March (leap day last)
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let days = 365 * y + y / 4 - y / 100 + y / 400 + (153 * m + 2) / 5 + day - 1 - 719_468;
+    Some(days * 86_400_000 + clock_ms(time.as_bytes())?)
 }
 
 fn now_ms() -> i64 {
@@ -455,7 +595,7 @@ fn pace(start: Instant, sent: u64, rate: u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clock_ms, java_string_hash, row_time};
+    use super::{Summary, instant_ms, is_price_row, java_string_hash, json_str, percentile, with_symbol};
 
     /// (symbol, Java `s.hashCode()`, Java `Math.floorMod(s.hashCode(), 4)`), produced with JDK 25.
     const JAVA: &[(&str, i32, i32)] = &[
@@ -467,14 +607,53 @@ mod tests {
     ];
 
     #[test]
-    fn parses_feed_times() {
-        assert_eq!(clock_ms(b"09:05:01.250"), Some(((9 * 60 + 5) * 60 + 1) * 1000 + 250));
-        assert_eq!(clock_ms(b"09:05:01.5"), Some(((9 * 60 + 5) * 60 + 1) * 1000 + 500));
-        assert_eq!(clock_ms(b"09:05:01"), Some(((9 * 60 + 5) * 60 + 1) * 1000));
-        assert_eq!(clock_ms(b""), None);
-        assert_eq!(clock_ms(b"9:05"), None);
-        assert_eq!(row_time(b"A2ASZ7.ETR,E,08-11-2021,01:01:07.000,,,"), Some(3_667_000));
-        assert_eq!(row_time(b"A2ASZ7.ETR,E"), None);
+    fn replaces_symbols_for_the_uniform_workload() {
+        let price = b"TTE.FR,E,08-11-2021,09:00:00.000,,,,,,,,,,,,,,,,,,42.5,1,09:00:00.000,,,,";
+        let other = b"TTE.FR,E,08-11-2021,09:00:00.000,,,,,,,,,,,,,,,,,,,,,,,,";
+        assert!(is_price_row(price) && !is_price_row(other) && !is_price_row(b"TTE.FR,E"));
+        assert!(with_symbol(price, 7).starts_with(b"U00007.FR,E,08-11-2021,09:00:00.000,"));
+        assert!(is_price_row(&with_symbol(price, 7)));
+    }
+
+    #[test]
+    fn parses_instants() {
+        assert_eq!(instant_ms("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(instant_ms("2026-11-22T21:56:09.123Z"), Some(1_795_384_569_123));
+        assert_eq!(instant_ms("2024-02-29T12:00:00Z"), Some(1_709_208_000_000));
+        assert_eq!(instant_ms("2024-03-01T00:00:00Z"), Some(1_709_251_200_000));
+        assert_eq!(instant_ms("2026-11-22T21:56:09"), None);
+    }
+
+    #[test]
+    fn nearest_rank_percentiles() {
+        let v: Vec<i64> = (1..=100).collect();
+        assert_eq!([50.0, 95.0, 99.0, 100.0].map(|p| percentile(&v, p)), [Some(50), Some(95), Some(99), Some(100)]);
+        assert_eq!(percentile(&[7], 50.0), Some(7));
+        assert_eq!(percentile(&[], 50.0), None);
+    }
+
+    #[test]
+    fn summary_counts_repeats_once_and_separates_the_first_close() {
+        let adv = |trader: &str, end: &str| {
+            format!(
+                "{{\"trader\":\"{trader}\",\"symbol\":\"TTE.FR\",\"type\":\"BUY\",\"window_end\":\"{end}\",\"close\":1.5,\
+                 \"initial\":false,\"fired_at\":\"1970-01-01T00:00:01Z\",\"emitted_at\":\"1970-01-01T00:00:01.010Z\"}}"
+            )
+        };
+        assert_eq!(json_str(&adv("t1", "e"), "window_end"), Some("e"));
+        let mut s = Summary::new(1_000);
+        s.add(1_030, "LogAppendTime", 1_020, &adv("t1", "2021-11-08T09:05:00"));
+        s.add(1_050, "LogAppendTime", 1_020, &adv("t1", "2021-11-08T09:10:00"));
+        s.add(1_060, "LogAppendTime", 1_020, &adv("t1", "2021-11-08T09:10:00")); // repeat
+        s.add(1_060, "LogAppendTime", 999, &adv("t2", "2021-11-08T09:10:00")); // before ready
+        s.add(1_060, "LogAppendTime", 1_020, "not json");
+        let j = s.json();
+        assert!(j.starts_with(
+            "{\"summary\":{\"read\":5,\"distinct\":3,\"repeats\":1,\"unparsed\":1,\"before_ready\":1,\"traders\":2,"
+        ), "{j}");
+        assert!(j.contains("\"steady\":{\"closes\":1,\"messages\":1,\"ms\":{\"fired_to_emitted\":{\"p50\":10,"), "{j}");
+        assert!(j.contains("\"fired_to_received\":{\"p50\":50,"), "{j}");
+        assert!(j.contains("\"cold\":{\"closes\":1,\"messages\":1,"), "{j}");
     }
 
     #[test]

@@ -98,7 +98,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(flink_taskmanager_job_task_operator_KafkaSourceReader_KafkaConsumer_records_lag_max{operator_name=\"Source:_kafka_source\"})",
+          "expr": "sum(flink_taskmanager_job_task_operator_pendingRecords{operator_name=\"Source:_kafka_source\"})",
           "legendFormat": "lag",
           "range": false,
           "instant": true,
@@ -628,7 +628,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "label_replace(flink_taskmanager_job_task_busyTimeMsPerSecond, \"task\", \"$1\", \"task_name\", \"(Source|window_5min|ema|timescaledb_issues).*\")",
+          "expr": "label_replace(flink_taskmanager_job_task_busyTimeMsPerSecond, \"task\", \"$1\", \"task_name\", \"(Source|window_5min|ema|timescaledb_ema:_Writer|timescaledb_ema:_Committer|timescaledb_issues).*\")",
           "legendFormat": "{{task}} #{{subtask_index}}",
           "range": true,
           "instant": false,
@@ -697,7 +697,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "label_replace(flink_taskmanager_job_task_backPressuredTimeMsPerSecond, \"task\", \"$1\", \"task_name\", \"(Source|window_5min|ema|timescaledb_issues).*\")",
+          "expr": "label_replace(flink_taskmanager_job_task_backPressuredTimeMsPerSecond, \"task\", \"$1\", \"task_name\", \"(Source|window_5min|ema|timescaledb_ema:_Writer|timescaledb_ema:_Committer|timescaledb_issues).*\")",
           "legendFormat": "{{task}} #{{subtask_index}}",
           "range": true,
           "instant": false,

@@ -15,9 +15,16 @@ reference/.venv/bin/python reference/ema_reference.py --lateness inf --out refer
 
 reference/.venv/bin/python reference/plot_symbols.py \
     --windows reference/output-nozero/windows.parquet --suffix _nozero --label "zero prices excluded"
+
+reference/.venv/bin/python reference/compare.py                       # Flink results vs reference/output-nozero
 ```
 
-Options: `--data-dir` (default `data`), `--out` (default `reference/output`), `--files` (some days only),
+`compare.py` compares table `ema_window` with the reference: the same windows, and ticks, close, both EMAs, advisories
+and `initial` marks bit for bit. The md5 of `output-nozero` in the export format of `bench/backlog.py` is
+`19413a509d53044973e3e6b76c177af1`, the same as the job's (`WEEK_DIGEST`), so every run with that digest equals the
+reference.
+
+Options of `ema_reference.py`: `--data-dir` (default `data`), `--out` (default `reference/output`), `--files` (some days only),
 `--exclude-zero-prices`, `--lateness SECONDS` (default 60, `inf` keeps late events), `--jobs` (files read
 in parallel).
 

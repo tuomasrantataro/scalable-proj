@@ -22,6 +22,7 @@ x-flink-env: &flink-env
   JDBC_URL: jdbc:postgresql://timescaledb:5432/trading
   JDBC_USER: postgres
   JDBC_PASSWORD: postgres
+  JDBC_BATCH_SIZE: ${JDBC_BATCH_SIZE:-1000}         # rows per upsert batch of the TimescaleDB sinks
   OUT_OF_ORDERNESS_S: ${OUT_OF_ORDERNESS_S:-60}
   IDLENESS_S: ${IDLENESS_S:-10}       # 0 = no idleness
   # Pause a partition that is this far (event time) ahead of the slowest one; 0 = off (TradingJob)
@@ -174,11 +175,13 @@ services:
       CSV_FILE: ${CSV_FILE:-/data/pala.csv}
       REPEAT: ${REPEAT:-1}
       RATE: ${RATE:-0}
-      # Pace by the feed's own clock (column Time): 1 = real time, 10 = ten times faster; 0 = off (RATE applies)
+      # Pace by the feed's own clock (producer-rs/src/feed.rs): 1 = real time, 10 = ten times faster; 0 = off (RATE applies)
       SPEEDUP: ${SPEEDUP:-0}
-      # Only rows with Time in [START_TIME, END_TIME), HH:MM; empty = all
+      # Only what the feed delivered in [START_TIME, END_TIME), HH:MM; empty = all
       START_TIME: ${START_TIME:-}
       END_TIME: ${END_TIME:-}
+      # > 0: replace the symbols by this many equally frequent ones (bench/backlog.py --workload uniform)
+      UNIFORM_SYMBOLS: ${UNIFORM_SYMBOLS:-0}
       KAFKA_COMPRESSION: ${KAFKA_COMPRESSION:-lz4}   # CSV rows compress about 4x
       KAFKA_LINGER_MS: ${KAFKA_LINGER_MS:-20}
       # Sender threads. librdkafka reads the clock for every record, a system call on this laptop (HPET clock
@@ -198,6 +201,8 @@ services:
     environment:
       <<: *kafka-env
       SERVICE: advisory-latency
+      # messages = one line per message; summary = aggregate in the consumer, one line when idle (many subscribers)
+      LATENCY_OUTPUT: ${LATENCY_OUTPUT:-messages}
     depends_on:
       kafka-setup: { condition: service_completed_successfully }
 

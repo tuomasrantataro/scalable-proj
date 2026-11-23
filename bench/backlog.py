@@ -22,6 +22,12 @@ Usage (repo root):
   python3 bench/backlog.py run --taskmanagers 2 --slots 4 --parallelism 8
   python3 bench/backlog.py reset
   python3 bench/backlog.py run --set WATERMARK_ALIGNMENT_S=0          # any job setting from docker-compose.yml
+
+Long tail: each run also records how evenly the load is spread (`skew`: records per partition, records and busy time
+per subtask, each with max/mean). For comparison, the same rows with evenly spread symbols can be loaded into a topic of
+their own and run the same way (its results are meaningless as market data, so they have no reference digest):
+  python3 bench/backlog.py load --data-dir ./data --workload uniform
+  python3 bench/backlog.py run --workload uniform
 """
 import argparse
 import hashlib
@@ -40,7 +46,12 @@ import advisory_latency
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "bench" / "results" / "backlog_runs.jsonl"
 TOPIC = "ticks"
-# md5 of the ema_window export below for the whole week; the same with Iggy (1 partition) and Kafka (8 partitions)
+WORKLOADS = {"real": TOPIC, "uniform": "ticks-uniform"}
+# Symbols of the uniform workload: with 2,047, evenly spread price events fill as many (symbol, 5-min window) pairs in
+# the whole week as the real ones (1,855,738 vs 1,855,645), so the EMA and database load is the same.
+UNIFORM_SYMBOLS = 2047
+# md5 of the ema_window export below for the whole week; the same with Iggy (1 partition), Kafka (8 partitions) and the
+# pandas reference (reference/compare.py)
 WEEK_DIGEST = "19413a509d53044973e3e6b76c177af1"
 EMA_EXPORT = ("\\copy (SELECT symbol, window_end, close, ticks, ema38, ema100, advisory, initial FROM ema_window "
               "ORDER BY symbol, window_end) TO STDOUT CSV")
@@ -66,10 +77,16 @@ def kafka(tool, args):
     return sh(f"docker compose exec -T kafka /opt/kafka/bin/{tool} --bootstrap-server localhost:9092 {args}")
 
 
-def topic_records():
+def partition_records(topic=TOPIC):
+    """Records per partition; empty if the topic does not exist."""
     out = sh(f"docker compose exec -T kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 "
-             f"--topic {TOPIC}", check=False)
-    return sum(int(line.rsplit(":", 1)[1]) for line in out.split() if line.count(":") == 2)
+             f"--topic {topic}", check=False)
+    parts = [line.rsplit(":", 2) for line in out.split() if line.count(":") == 2]
+    return [int(n) for _, _, n in sorted(parts, key=lambda p: int(p[1])) if n.isdigit()]
+
+
+def topic_records(topic=TOPIC):
+    return sum(partition_records(topic))
 
 
 def group_lag(group, topic=TOPIC):
@@ -101,6 +118,68 @@ def prom_series(expr, start, end, step=5):
     return out
 
 
+def balance(values):
+    """How evenly `values` (one per partition or subtask) are spread; max_over_mean 1 = perfectly even."""
+    mean = sum(values) / len(values) if values else 0
+    return {"values": [round(v) for v in values], "max_over_mean": round(max(values) / mean, 3) if mean else None}
+
+
+def task_times(job_id, start, end, from_start):
+    """{task: {"busy": [ms/s per subtask], "backpressured": [...]}} of one job, over its whole life so far
+    (from_start) or between the first and last sample in [start, end].
+
+    From Flink's accumulated counters, as shares of busy + backpressured + idle time. The ...TimeMsPerSecond gauges
+    are not used: they are moving averages over a minute, which smears short runs, and read 1000 in the first sample
+    after a job start (an idle task then averages 60-110 ms/s)."""
+    raw = {}
+    for kind in ("Busy", "BackPressured", "Idle"):
+        series = prom_series("max by (task_name, subtask_index) "
+                             f'(flink_taskmanager_job_task_accumulate{kind}TimeMs{{job_id="{job_id}"}})', start, end)
+        for k, v in series.items():
+            if len(v) >= (1 if from_start else 2):
+                d = dict(k)
+                raw.setdefault(d["task_name"], {}).setdefault(int(d["subtask_index"]), {})[kind] = \
+                    max(0, v[-1] - (0 if from_start else v[0]))
+    out = {}
+    for task, subtasks in raw.items():
+        times = [subtasks[i] for i in sorted(subtasks) if len(subtasks[i]) == 3 and sum(subtasks[i].values()) > 0]
+        share = lambda kind: [1000 * t[kind] / sum(t.values()) for t in times]
+        if times:
+            out[task] = {"busy": share("Busy"), "backpressured": share("BackPressured")}
+    return out
+
+
+def subtask_skew(job_id, start, end):
+    """Records per subtask of one job (balance() each), from Prometheus."""
+    job = f'job_id="{job_id}"'
+    reads = "flink_taskmanager_job_task_operator_KafkaSourceReader_KafkaConsumer_records_consumed_total"
+    records_in = "flink_taskmanager_job_task_operator_numRecordsIn"
+    counters = {"read from Kafka": f"{reads}{{{job}}}",
+                "price events into window": f'{records_in}{{{job},operator_name="window_5min"}}',
+                "windows into ema": f'{records_in}{{{job},operator_name="ema"}}'}
+    records = {}
+    for name, expr in counters.items():     # the last sample of a counter is its total
+        series = prom_series(f"max by (subtask_index) ({expr})", start, end)
+        totals = {int(dict(k)["subtask_index"]): max(v) for k, v in series.items() if v}
+        if totals:
+            records[name] = balance([totals[i] for i in sorted(totals)])
+    return records
+
+
+def memory(start, end):
+    """Memory in MB over [start, end]: {service: {avg, max}} (working set, all containers of a service together) and
+    the JVM heap used by the TaskManagers. Prometheus keeps the last value of a removed container (of the run before)
+    for five minutes, so only containers cAdvisor has just seen are counted."""
+    seen = "container_memory_working_set_bytes and on (name) (time() - container_last_seen < 12)"
+    stats = lambda v: {"avg": round(sum(v) / len(v) / 1e6), "max": round(max(v) / 1e6)}
+    series = prom_series(f"sum by (container_env_SERVICE) ({seen})", start, end)
+    out = {dict(k).get("container_env_SERVICE", "?"): stats(v) for k, v in series.items() if v}
+    for v in prom_series("sum(flink_taskmanager_Status_JVM_Memory_Heap_Used)", start, end).values():
+        if v:
+            out["taskmanager heap"] = stats(v)
+    return out
+
+
 def flink_job():
     jobs = json.load(urllib.request.urlopen("http://localhost:8081/jobs/overview"))["jobs"]
     running = [j for j in jobs if j["state"] == "RUNNING"]
@@ -108,28 +187,31 @@ def flink_job():
 
 
 def load(a):
+    topic = WORKLOADS[a.workload]
+    os.environ["KAFKA_TOPIC"] = topic
+    producer = {"UNIFORM_SYMBOLS": str(a.uniform_symbols if a.workload == "uniform" else 0)}
     days = a.days.split(",")
     files = [f"debs2022-gc-trading-day-{d}-11-21.csv" for d in days]
     for f in files:
         if not (Path(a.data_dir) / f).exists():
             sys.exit(f"missing {Path(a.data_dir) / f}")
-    log("== stopping Flink, recreating topic", TOPIC, f"with {a.partitions} partitions")
+    log("== stopping Flink, recreating topic", topic, f"with {a.partitions} partitions")
     sh("docker compose rm -sf jobmanager taskmanager")
     sh("docker compose up -d --wait kafka")
     sh("docker compose build kafka-setup")
-    kafka("kafka-topics.sh", f"--delete --if-exists --topic {TOPIC}")
+    kafka("kafka-topics.sh", f"--delete --if-exists --topic {topic}")
     for _ in range(60):  # deletion is asynchronous
-        if TOPIC not in kafka("kafka-topics.sh", "--list").split():
+        if topic not in kafka("kafka-topics.sh", "--list").split():
             break
         time.sleep(1)
     out = sh("docker compose run --rm --no-deps kafka-setup", env={"KAFKA_PARTITIONS": str(a.partitions)})
-    log("   " + next(l for l in out.splitlines() if f"topic {TOPIC} with" in l))
+    log("   " + next(l for l in out.splitlines() if f"topic {topic} with" in l))
     t0 = time.time()
     for f in files:
         out = sh("docker compose run --rm --no-deps replay-producer",
-                 env={"DATA_DIR": a.data_dir, "CSV_FILE": f"/data/{f}"})
+                 env={"DATA_DIR": a.data_dir, "CSV_FILE": f"/data/{f}", **producer})
         log("   " + f + ": " + next(l for l in out.splitlines() if "replay done" in l).split("] ")[1])
-    n = topic_records()
+    n = topic_records(topic)
     secs = time.time() - t0
     log(f"== loaded {n:,} records in {secs:.0f} s ({n / secs:,.0f} msg/s incl. container starts); "
         f"disk: {sh('docker compose exec -T kafka du -sh /var/lib/kafka/data').split()[0]}")
@@ -172,17 +254,23 @@ def start_job(env):
 
 
 def run(a):
-    total = topic_records()
+    topic = WORKLOADS[a.workload]
+    os.environ["KAFKA_TOPIC"] = topic
+    sh("docker compose up -d --wait kafka")
+    partitions = partition_records(topic)
+    total = sum(partitions)
     if total == 0:
-        sys.exit("topic ticks is empty: run `bench/backlog.py load` first")
+        sys.exit(f"topic {topic} is empty: run `bench/backlog.py load --workload {a.workload}` first")
     if a.parallelism > a.taskmanagers * a.slots:
         sys.exit(f"parallelism {a.parallelism} needs at least that many slots "
                  f"(TaskManagers {a.taskmanagers} x slots {a.slots})")
     group = "backlog-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     settings = dict(kv.split("=", 1) for kv in a.set)
+    if a.workload == "uniform":  # every window mixes instruments: without this, each would be a price jump issue
+        settings = {"PRICE_JUMP_REPORT": "1e18", **settings}
     env = {"KAFKA_GROUP": group, "TASKMANAGERS": str(a.taskmanagers), "TASK_SLOTS": str(a.slots),
            "PARALLELISM": str(a.parallelism), **settings}
-    log(f"== backlog of {total:,} records; TaskManagers={a.taskmanagers} slots={a.slots} "
+    log(f"== backlog of {total:,} records ({a.workload}); TaskManagers={a.taskmanagers} slots={a.slots} "
         f"parallelism={a.parallelism} group={group}" + (f" {settings}" if settings else ""))
     reset()
     advisory_latency.start()
@@ -197,7 +285,7 @@ def run(a):
         state = sql("SELECT count(*) || ' ' || (SELECT count(*) FROM data_issue) FROM ema_window")
         if state != last:
             last, last_change = state, time.time()
-        lag = group_lag(group)
+        lag = group_lag(group, topic)
         if lag == 0 and time.time() - last_change >= a.stable:
             break
         if time.time() - t_running > a.timeout:
@@ -210,13 +298,17 @@ def run(a):
     rate = prom_series("sum(flink_taskmanager_job_task_operator_KafkaSourceReader_KafkaConsumer_records_consumed_rate)",
                        start, end)
     rates = [v for vals in rate.values() for v in vals if v > 1000]
-    busy = prom_series("avg by (task_name) (flink_taskmanager_job_task_busyTimeMsPerSecond)", start, end)
-    bp = prom_series("avg by (task_name) (flink_taskmanager_job_task_backPressuredTimeMsPerSecond)", start, end)
     cpu = prom_series("sum by (container_env_SERVICE) (rate(container_cpu_usage_seconds_total[30s]))", start, end)
     avg = lambda v: sum(v) / len(v) if v else float("nan")
-    tasks = {dict(k)["task_name"]: {"busy": round(avg(v)), "backpressured": round(avg(bp.get(k, [])))}
-             for k, v in busy.items()}
+    job_id = flink_job()["jid"]
+    times = task_times(job_id, start, end, from_start=True)
+    tasks = {name: {k: round(avg(v)) for k, v in t.items()} for name, t in times.items()}
     cpu_pct = {dict(k).get("container_env_SERVICE", "?"): round(avg(v) * 100) for k, v in cpu.items()}
+
+    mem = memory(start, end)
+    # up to now: the counters' last samples may come after the last output row
+    skew = {"partitions": balance(partitions), "records": subtask_skew(job_id, start, int(time.time())),
+            "busy": {name: balance(t["busy"]) for name, t in times.items()}}
 
     digest = hashlib.md5(subprocess.run(
         ["docker", "compose", "exec", "-T", "timescaledb", "psql", "-U", "postgres", "-d", "trading", "-c", EMA_EXPORT],
@@ -227,12 +319,12 @@ def run(a):
     latency = advisory_latency.stop(argparse.Namespace(label=group))
 
     result = {
-        "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "time": datetime.now(timezone.utc).isoformat(timespec="seconds"), "workload": a.workload,
         "taskmanagers": a.taskmanagers, "slots": a.slots, "parallelism": a.parallelism, "settings": settings, "group": group,
         "records": total, "drain_s": round(drain, 1), "records_per_s": round(total / drain),
         "read_rate_avg": round(avg(rates)), "read_rate_max": round(max(rates, default=0)),
         "ema_rows": int(rows), "buy": int(buy), "sell": int(sell), "issues": issues, "digest": digest,
-        "tasks": tasks, "cpu_pct": cpu_pct,
+        "tasks": tasks, "cpu_pct": cpu_pct, "mem_mb": mem, "skew": skew,
         "advisory_latency_ms": {"messages": latency["messages"], **latency["ms"]["fired_to_received"]},
     }
     RESULTS.parent.mkdir(exist_ok=True)
@@ -247,7 +339,14 @@ def run(a):
     for name, t in sorted(tasks.items(), key=lambda kv: -kv[1]["busy"]):
         log(f"     {t['busy']:5d} / {t['backpressured']:4d}  {name}")
     log("   CPU % of a core: " + ", ".join(f"{k} {v}" for k, v in sorted(cpu_pct.items(), key=lambda kv: -kv[1])))
+    log("   memory MB, max: " + ", ".join(f"{k} {v['max']}" for k, v in sorted(mem.items(), key=lambda kv: -kv[1]["max"])))
+    log("   skew, max/mean: " + ", ".join(
+        f"{k} {v['max_over_mean']}" for k, v in {"Kafka partitions": skew["partitions"], **skew["records"]}.items()))
+    log("   busy time, max/mean over subtasks: " + ", ".join(
+        f"{k.split('____')[0]} {v['max_over_mean']}" for k, v in skew["busy"].items()
+        if tasks[k]["busy"] >= 50))  # of nearly idle tasks it is noise
     log(f"   appended to {RESULTS.relative_to(ROOT)}")
+    return result
 
 
 def main():
@@ -257,7 +356,10 @@ def main():
     l.add_argument("--data-dir", default="./data")
     l.add_argument("--days", default="08,09,10,11,12,13,14", help="comma-separated days of Nov 2021")
     l.add_argument("--partitions", type=int, default=8)
+    l.add_argument("--workload", choices=WORKLOADS, default="real")
+    l.add_argument("--uniform-symbols", type=int, default=UNIFORM_SYMBOLS, help="symbols of the uniform workload")
     r = sub.add_parser("run", help="replay the stored backlog into the job and measure")
+    r.add_argument("--workload", choices=WORKLOADS, default="real")
     r.add_argument("--taskmanagers", type=int, default=4)
     r.add_argument("--slots", type=int, default=1, help="task slots per TaskManager")
     r.add_argument("--parallelism", type=int, default=4)

@@ -216,16 +216,16 @@ docker-compose.yml   kafka, kafka-setup, timescaledb, db-setup, jobmanager, task
 MEASUREMENTS.md      measurements with Kafka (producer, full week, bottleneck, JDBC sink and failover)
 producer-rs/         replay producer + kafka-setup + advisory latency consumer (Rust, rdkafka, Cargo, Dockerfile)
 flink-job/           Flink application (ema/: EMA, advisories, data quality; unit tests in src/test)
-bench/               benchmark scripts (backlog.py, advisory_latency.py, latency_sweep.py)
+bench/               benchmark scripts (backlog.py, scaling_matrix.py, latency_sweep.py, peak_test.py, subscriber_sweep.py,
+                     advisory_latency.py) and the data set analysis symbol_distribution.py
 docs/                requirements, architecture, report; iggy.md (the earlier Iggy setup: tests, measurements,
                      why it was replaced); figures/reference/ (reference result plots)
-reference/           pandas reference implementation, unit tests, plots
+reference/           pandas reference implementation, comparison with the job's results (compare.py), unit tests, plots
 config/              subscriptions.txt (per-trader advisory subscriptions), timescaledb/init.sql (schema),
                      grafana/ (data sources, dashboards), prometheus/prometheus.yml
 data/                CSV files (git-ignored)
 
 planned:
-reference/           comparison script (Flink output in TimescaleDB vs reference)
 autoscaler/          (stretch) custom scaling controller
 ```
 

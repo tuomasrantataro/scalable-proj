@@ -105,8 +105,41 @@ python3 bench/latency_sweep.py                                # speeds 1,3,10,30
 python3 bench/latency_sweep.py --speeds 10,30,100,300,0       # without the slow real-time points
 ```
 
-The producer's `SPEEDUP` (pace by the feed's `Time` column, 1 = real time) and `START_TIME`/`END_TIME` (HH:MM)
-can also be used directly, e.g. `SPEEDUP=10 START_TIME=09:00 END_TIME=10:00 CSV_FILE=/data/<day>.csv`.
+The producer's `SPEEDUP` (pace by the feed's clock, 1 = real time) and `START_TIME`/`END_TIME` (HH:MM, what the feed
+delivered in that time; rows with a stray `Time` do not count, see [`feed.rs`](producer-rs/src/feed.rs)) can also be
+used directly, e.g. `SPEEDUP=10 START_TIME=09:00 END_TIME=10:00 CSV_FILE=/data/<day>.csv`.
+
+Scalability scripts (NFR-4 to NFR-6). Each writes `summary.md` and the raw results to `bench/results/<script>/<time>/`,
+updated after every run:
+
+```bash
+python3 bench/scaling_matrix.py      # configurations × 3 repeats of `backlog.py run`: median, spread, speedup, efficiency
+python3 bench/subscriber_sweep.py    # 1 to 1,000 traders with generated subscriptions; checks every delivery
+python3 bench/peak_test.py           # busiest minute overall and per exchange, at 10x, 30x, 100x and maximum speed
+python3 bench/peak_test.py --find    # only find the busiest minutes
+```
+
+`scaling_matrix.py` needs the loaded events (step 2); the other two replay slices cut from the CSV files
+([`bench/workload.py`](bench/workload.py), kept in `data/slices`).
+
+Long tail: each `run` records how evenly the load is spread (records per partition, records and busy time per subtask,
+each with max/mean) and the memory per service. To compare with evenly spread symbols, load the same rows with 2,047
+equally frequent symbols (as many non-empty windows as the real week) into topic `ticks-uniform`; the results are
+meaningless as market data, only the load is comparable:
+
+```bash
+python3 bench/symbol_distribution.py                              # offline: concentration, hash balance, symbols.csv
+python3 bench/backlog.py load --data-dir ./data --workload uniform
+python3 bench/backlog.py run --workload uniform                   # also: scaling_matrix.py --workload uniform
+```
+
+Correctness: compare the job's results in TimescaleDB with the pandas reference, bit for bit
+([`reference/`](reference/README.md)):
+
+```bash
+reference/.venv/bin/python reference/compare.py                        # after a whole-week run
+reference/.venv/bin/python reference/compare.py --through 2021-11-08   # after a run of day 8 only
+```
 
 What can be scaled:
 
@@ -165,7 +198,7 @@ when `kafka-setup` creates the topic; `REPEAT`, `RATE`, `KAFKA_COMPRESSION` (lz4
 `PRODUCER_THREADS` (8) for the producer; `DATA_DIR` (default `./docs`); `TASKMANAGERS` (4), `TASK_SLOTS` (1),
 `PARALLELISM` (4), `KAFKA_TOPIC` (`ticks`), `KAFKA_GROUP` (`flink`),
 `KAFKA_MAX_POLL_RECORDS` (5000), `CHECKPOINT_INTERVAL` (default `10 s`), `OUT_OF_ORDERNESS_S` (60), `IDLENESS_S`
-(10) and `WATERMARK_ALIGNMENT_S` (300; pauses a partition that is that far ahead in event time, see
+(10), `JDBC_BATCH_SIZE` (1000) and `WATERMARK_ALIGNMENT_S` (300; pauses a partition that is that far ahead in event time, see
 [architecture §3.4](docs/architecture.md#34-watermarks-and-late-events-nfr-7)) for the job;
 `SKEW_REPORT_S` (3600) and `PRICE_JUMP_REPORT` (0.10) for the data quality report, and `SUBSCRIPTIONS_FILE`
 (`/config/subscriptions.txt`).
