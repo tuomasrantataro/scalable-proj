@@ -614,7 +614,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "ms per second a task is busy (1000 = saturated). The busiest task limits throughput.",
+      "description": "ms per second a task is busy (1000 = saturated). The busiest task limits throughput. Share of busy + backpressured + idle time over the last 30 s (accumulated counters).",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -628,7 +628,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "label_replace(flink_taskmanager_job_task_busyTimeMsPerSecond, \"task\", \"$1\", \"task_name\", \"(Source|window_5min|ema|timescaledb_ema:_Writer|timescaledb_ema:_Committer|timescaledb_issues).*\")",
+          "expr": "label_replace(1000 * clamp_min(delta(flink_taskmanager_job_task_accumulateBusyTimeMs[30s]), 0) / (delta(flink_taskmanager_job_task_accumulateBusyTimeMs[30s]) + delta(flink_taskmanager_job_task_accumulateBackPressuredTimeMs[30s]) + delta(flink_taskmanager_job_task_accumulateIdleTimeMs[30s])), \"task\", \"$1\", \"task_name\", \"(Source|window_5min|ema|timescaledb_ema:_Writer|timescaledb_ema:_Committer|timescaledb_issues).*\")",
           "legendFormat": "{{task}} #{{subtask_index}}",
           "range": true,
           "instant": false,
@@ -683,7 +683,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "ms per second a task waits for its downstream. High at the source = a downstream task is the bottleneck.",
+      "description": "ms per second a task waits for its downstream. High at the source = a downstream task is the bottleneck. Share of busy + backpressured + idle time over the last 30 s (accumulated counters).",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -697,7 +697,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "label_replace(flink_taskmanager_job_task_backPressuredTimeMsPerSecond, \"task\", \"$1\", \"task_name\", \"(Source|window_5min|ema|timescaledb_ema:_Writer|timescaledb_ema:_Committer|timescaledb_issues).*\")",
+          "expr": "label_replace(1000 * clamp_min(delta(flink_taskmanager_job_task_accumulateBackPressuredTimeMs[30s]), 0) / (delta(flink_taskmanager_job_task_accumulateBusyTimeMs[30s]) + delta(flink_taskmanager_job_task_accumulateBackPressuredTimeMs[30s]) + delta(flink_taskmanager_job_task_accumulateIdleTimeMs[30s])), \"task\", \"$1\", \"task_name\", \"(Source|window_5min|ema|timescaledb_ema:_Writer|timescaledb_ema:_Committer|timescaledb_issues).*\")",
           "legendFormat": "{{task}} #{{subtask_index}}",
           "range": true,
           "instant": false,
