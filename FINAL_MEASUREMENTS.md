@@ -9,7 +9,7 @@ starting over (part B). What the system is: [`docs/architecture.md`](docs/archit
 |---|---|---|
 | **RAM** | **16 GB minimum, 32 GB recommended** | Containers: 6–7 GB with 4 TaskManagers (measured), about 11 GB with 8 (estimate). The reference (A3) takes about 6 GB per file it reads at once: 12 GB by default, 6 GB with `--jobs 1`. Measured on a host with 35 GB |
 | **Disk** | **75 GB**: 24 GB CSV files + about 50 GB free | Kafka up to 20 GB, Docker images and build cache up to 20 GB, slices about 9 GB, the rest 2 GB |
-| **Time** | **about 10 hours**, nearly all unattended | Table below. The smoke tests (A1–A4) take about 45 min |
+| **Time** | **about 10 hours**, unattended with `scripts/run-final.sh` | Table below. The smoke tests (A1–A4) take about 45 min |
 | **CPU** | 8 cores / 16 threads for the 8-TaskManager runs | Everything runs on one host. No GPU is used |
 | **Software** | Docker with Compose v2, Python 3.11 or newer, Linux | Free ports: 3001, 5432, 8081, 9090, 9094 |
 
@@ -30,6 +30,35 @@ Times are from earlier runs on the 16-thread laptop, or estimates from them; oth
 | A10c | Design alternatives; failover | 50 min |
 | A11 | Live run, visualization | 15 min |
 | | **Total** | **about 10 h** |
+
+## Run everything unattended
+
+```bash
+scripts/run-final.sh
+```
+
+Checks the host (CSV files, Docker, memory, disk, mains power, ports, nothing uncommitted), asks once, and runs A1–A11 in the
+background with sleep inhibited. **It deletes everything the system has stored** (A2); `./data` and `bench/results` are kept.
+
+| | |
+|---|---|
+| Progress | `scripts/run-final.sh status`, or `tail -f bench/results/final/run.log` |
+| Stop, continue | `scripts/run-final.sh stop`; then `scripts/run-final.sh` again: finished steps are kept, failed ones are repeated |
+| Begin anew | move `bench/results/final` away |
+| Try it first | `scripts/run-final.sh --test`: the same steps, shortened, on 8 Nov (about 1.5 h). Also deletes what is stored |
+| Result | `bench/results/final/summary.md`; a log per step in `bench/results/final/logs/` |
+
+Every step has a time limit. A failure in A1–A5 stops the run; a later step is tried twice, then recorded as failed, and the
+run goes on. Expected values (digests, counts, deliveries) are checked; other numbers are not judged.
+
+What is left for you:
+
+1. Before: close other programs, plug in, **stay logged in** (locking the screen is fine), keep the network on (the image
+   builds look up their base images). Do not edit files of the repository during the run.
+2. After about an hour: `status` shows `A5-week: ok`, the correctness results are in.
+3. At the end: read `summary.md`, take the screenshots of A11 (the system keeps running), then A12.
+
+Parts A and B below are the same steps by hand.
 
 ## Which requirement is covered where
 
@@ -332,25 +361,16 @@ python bench/backlog.py run --set WATERMARK_ALIGNMENT_S=0 | tee bench/results/fi
 python bench/backlog.py run --set WATERMARK_ALIGNMENT_S=0 | tee bench/results/final/a10c-no-alignment-2.txt
 ```
 
-Failover: kill a TaskManager in the middle of a run. Needs two terminals, the week in `ticks`.
+Failover: a TaskManager is killed in the middle of a run and started again. Needs the week in `ticks`.
 
 ```bash
-python bench/backlog.py run | tee bench/results/final/a10c-failover.txt      # terminal 1
-```
-
-```bash
-docker kill scalable-proj-taskmanager-1                                      # terminal 2, about 30 s after "RUNNING"
-docker start scalable-proj-taskmanager-1                                     # 10 s later
-```
-
-```bash
-python reference/compare.py | tee bench/results/final/a10c-failover-compare.txt      # when the run has ended
+python bench/failover.py | tee bench/results/final/a10c-failover.txt
+python reference/compare.py | tee bench/results/final/a10c-failover-compare.txt
 python bench/check_delivery.py | tee bench/results/final/a10c-failover-delivery.txt
 ```
 
-Expected: the reference digest, `identical` and `CORRECT`: no event lost, none counted twice. The run takes longer, and its
-CPU and skew are not comparable with other runs. Grafana (Correctness) shows how many rows were written more than once. (The
-containers are named after the directory; `docker ps` shows the names.)
+Expected: at least one restart, the reference digest, `identical` and `CORRECT`: no event lost, none counted twice. The run
+takes longer, and its CPU and skew are not comparable with other runs.
 
 ## A11. Live run and visualization
 

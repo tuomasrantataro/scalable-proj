@@ -143,7 +143,7 @@ reference/.venv/bin/python reference/compare.py --through 2021-11-08   # after a
 python3 bench/check_delivery.py                                        # delivered advisories, after a whole-week run
 ```
 
-Every measurement for the report, step by step: [FINAL_MEASUREMENTS.md](FINAL_MEASUREMENTS.md).
+Every measurement for the report: [FINAL_MEASUREMENTS.md](FINAL_MEASUREMENTS.md), unattended with `scripts/run-final.sh`.
 
 What can be scaled:
 

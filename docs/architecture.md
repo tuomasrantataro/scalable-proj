@@ -270,6 +270,7 @@ dashboards show times in UTC, which is how local exchange time is stored (§3.3)
 
 | Script | Function |
 |---|---|
+| `scripts/run-final.sh` | Runs every measurement of `FINAL_MEASUREMENTS.md` unattended |
 | `scripts/run-live.sh` | Runs the whole system live: starts all services, replays the CSV files and prints a summary |
 | `bench/backlog.py` | Loads the input into Kafka once; resets the system; measures a run over the stored input; shows what is loaded |
 | `bench/scaling_matrix.py` | Resource configurations, repeated: time, speedup, efficiency, CPU, memory, skew |
@@ -283,6 +284,7 @@ dashboards show times in UTC, which is how local exchange time is stored (§3.3)
 | `bench/symbol_distribution.py` | Distribution of the load over symbols, partitions and subtasks (offline) |
 | `bench/event_types.py` | Event types of the data set per exchange and security type (offline) |
 | `bench/event_handling.py` | What the job did with every event of a run: skipped, dropped, reported, used |
+| `bench/failover.py` | Kills a TaskManager in the middle of a run and starts it again |
 | `bench/check_delivery.py` | Compares the delivered advisories with the reference and the subscriptions |
 | `bench/advisory_latency.py` | Latency per stage: window fired → EMA result → stored in Kafka → received |
 | `bench/measure.py`, `bench/workload.py` | Shared helpers: measuring one replay; cutting slices and generating subscriptions |
@@ -297,7 +299,7 @@ docker-compose.yml   all services and their settings
 producer-rs/         replay-producer, kafka-setup and advisory-latency (one Rust program)
 flink-job/           Flink job and its unit tests
 config/              subscriptions, TimescaleDB schema, Grafana and Prometheus configuration
-scripts/             run-live.sh
+scripts/             run-live.sh, run-final.sh (and its helper check_matrix.py)
 bench/               benchmark scripts; results in results/, superseded ones in results/archive/
 reference/           pandas reference, comparison, plots, unit tests
 docs/                requirements, architecture, Iggy notes, figures, sample data (pala.csv)
