@@ -21,6 +21,7 @@ Usage (repo root):
   python3 bench/backlog.py run --taskmanagers 8 --parallelism 8
   python3 bench/backlog.py run --taskmanagers 2 --slots 4 --parallelism 8
   python3 bench/backlog.py reset
+  python3 bench/backlog.py status                                      # what is loaded, is a job running
   python3 bench/backlog.py run --set WATERMARK_ALIGNMENT_S=0          # any job setting from docker-compose.yml
 
 Long tail: each run also records how evenly the load is spread (`skew`: records per partition, records and busy time
@@ -233,6 +234,19 @@ def reset(_=None):
     sh("docker compose run --rm --no-deps --entrypoint sh jobmanager -c 'rm -rf /flink-checkpoints/*'")
 
 
+def status(_=None):
+    """Prints how many events are loaded and whether a job is running."""
+    sh("docker compose up -d --wait kafka")
+    for topic in WORKLOADS.values():
+        parts = partition_records(topic)
+        log(f"{topic:14} {sum(parts):>13,} records in {len(parts)} partitions" if parts else f"{topic:14} not loaded")
+    try:
+        job = flink_job()
+    except OSError:
+        job = None
+    log(f"job            {'running: ' + job['name'] if job else 'none running'}")
+
+
 def start_job(env):
     """Starts JobManager and TaskManagers with `env` and waits until every task runs; returns the RUNNING time."""
     sh("docker compose up -d --build --no-deps jobmanager taskmanager", env=env)
@@ -368,8 +382,9 @@ def main():
     r.add_argument("--stable", type=int, default=30, help="seconds without output change that end the run")
     r.add_argument("--timeout", type=int, default=3600)
     sub.add_parser("reset", help="stop the job and remove all results; keep the loaded events")
+    sub.add_parser("status", help="print what is loaded and whether a job is running")
     a = ap.parse_args()
-    {"load": load, "run": run, "reset": reset}[a.cmd](a)
+    {"load": load, "run": run, "reset": reset, "status": status}[a.cmd](a)
 
 
 if __name__ == "__main__":

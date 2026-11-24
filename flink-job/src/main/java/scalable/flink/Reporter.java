@@ -3,7 +3,6 @@ package scalable.flink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.InetAddress;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -43,13 +42,5 @@ public final class Reporter {
     public void stop() {
         exec.shutdownNow();
         report();
-    }
-
-    static String hostname() {
-        try {
-            return InetAddress.getLocalHost().getHostName();
-        } catch (Exception e) {
-            return "unknown";
-        }
     }
 }

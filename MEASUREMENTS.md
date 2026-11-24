@@ -139,7 +139,7 @@ whole week once, with Flink stopped: **289,116,808 records in 216 s, 5.6 GB on d
 until the group has committed every record and the output has not changed for 30 s. Time = job RUNNING → last
 `ema_window` row (`emitted_at`); it includes the job start and the final idleness timeout (10 s). Metrics are
 averages over that time. Non-price rows are still filtered in Flink. Raw results:
-`bench/results/backlog_runs.jsonl`.
+`bench/results/archive/backlog_runs.jsonl`.
 
 ### Finding: without watermark alignment the results depend on read timing
 
@@ -233,7 +233,7 @@ Flink's Kafka sink gives each record the Flink record's timestamp, which for win
 retention check, about a minute after writing it (broker log: `Deleting segment ... due to log retention time
 604800000ms breach`, `largestRecordTimestamp=1636362299999`). A trader's system that connected later received
 nothing, and the record timestamp said nothing about delivery. `kafka-setup` now creates `advisories` with
-`message.timestamp.type=LogAppendTime` (and sets it on an existing topic). After the fix all 73 advisories of the
+`message.timestamp.type=LogAppendTime` (an existing topic is kept as is). After the fix all 73 advisories of the
 week were still in the topic after the run.
 
 ### Finding: the first window close after a job start dominated the first measurements
@@ -307,7 +307,7 @@ ms unchained.
 The switches were environment variables read by a small class in the job (`EXP_EMA_SINK=unchained|discard`,
 `EXP_BUFFER_TIMEOUT_MS`), passed through `docker-compose.yml` and set with `bench/latency_sweep.py --set`. To repeat
 an experiment, apply the change from the table above in `EmaPipeline` and run the sweep with `--name`. Raw
-results: `bench/results/latency_sweep/*-exp-*` (first round), `*-exp2-*` (second round), each with
+results: `bench/results/archive/latency_sweep/*-exp-*` (first round), `*-exp2-*` (second round), each with
 `results.jsonl` and a chart (`latency.html`).
 
 Check after the change (switches removed, sink unchained in the code), same sweep, window close → received
@@ -469,7 +469,7 @@ would include it.
   cannot be compared with the 45k in §2.
 - **Memory:** Prometheus keeps the last value of removed containers for minutes, which doubled the sum; only containers
   cAdvisor has just seen are counted.
-- In `bench/results/backlog_runs.jsonl`, `backlog-20261123T201209` (busy time) and `backlog-20261123T201654` (memory)
+- In `bench/results/archive/backlog_runs.jsonl`, `backlog-20261123T201209` (busy time) and `backlog-20261123T201654` (memory)
   are one-day test runs from before these corrections; do not use them.
 
 Not run when this was written: `scaling_matrix.py`, the uniform workload, the exchange scopes of `peak_test.py`
@@ -528,14 +528,14 @@ and 09:15, without the cold start), 501 advisories (`bench/results/window_delay/
   `fetch.min.bytes` = 64 KiB with Kafka's default wait of 500 ms would fit the rest at this low rate; not tested.
 
 **Default: 1 s.** The smallest value whose delay could be measured, and above 0, so a small disorder is tolerated
-(see [architecture §3.4](docs/architecture.md#34-watermarks-and-late-events-nfr-7) for what it gives up).
+(how the bound works: [architecture §3.4](docs/architecture.md#34-watermarks-and-late-events-nfr-7)).
 
 ## 9. Every symbol subscribed (2026-11-24): no clear effect
 
 Full week, 4 TaskManagers × 1 slot, D = 1 s: the default subscriptions (73 messages, 14 symbols) against every symbol
 subscribed (`config/subscriptions-all.txt`, 11,349 messages, one trader). [`bench/subscription_test.py`](bench/subscription_test.py)
 ran the settings alternately (ABBA) after a discarded warm-up: 3 backlog and 2 live runs each, on mains power at the
-start and the end (`bench/results/subscription_test/20261124T084256-all-vs-default/`).
+start and the end (`bench/results/archive/subscription_test/20261124T084256-all-vs-default/`).
 
 **Correctness:** all 10 runs gave `WEEK_DIGEST` and 5,506 late events. With every symbol subscribed, 11,349 of 11,349
 advisories were delivered in each of the 5 runs, none missing or unexpected, so delivery is now checked for every
@@ -639,7 +639,7 @@ one run per point. Deliveries were exactly as subscribed in every point, and the
   traders. It is reported apart, as before.
 - **Stress point (lag up to 18,713 records):** 1,000 traders, every symbol, 10 Nov 09:00–17:30 at 100× (`...-all-1000`): 4,285,000 deliveries, all correct, but the
   first close took up to 44.6 s and closes are 3 s apart, so its steady percentiles (p50 13.6 s) measure its spill, not the load.
-- **Spill:** the same at 100 traders, 100× (`...-all`): p99 4.5 s. The script now marks such points `spill!`; the 100× and the
+- **Spill:** the same at 100 traders, 100× (`bench/results/archive/subscriber_sweep/20261124T121653-all/`): p99 4.5 s. The script now marks such points `spill!`; the 100× and the
   session results are kept but marked. In real time the closes are 5 min apart.
 - **Limits:** steady messages are copies of 657 advisories (from one day with fresh EMAs, so all initial BUYs; real crossovers need days
   of warm state), and the copies of one advisory are sent together: they are not independent samples. With 50 symbols per

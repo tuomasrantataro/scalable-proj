@@ -4,7 +4,7 @@
 1. Finds the busiest minute (rows by column Time) of every scope: all exchanges together, FR, NL and ETR.
    The rates per minute come from one scan of the files (about a minute per day, cached in <data-dir>/slices).
 2. Cuts a slice around it (default from 15 min before to 30 min after the 5-min window of the peak). The slice of an
-   exchange has only that exchange's rows (--whole-feed: the rows of all of them).
+   exchange has only that exchange's rows.
 3. Replays every slice at several speed-ups into a fresh job with every symbol subscribed and records the achieved
    rate, consumer lag, busy and backpressured time, CPU, memory, window and advisory latency (bench/measure.py).
 
@@ -99,7 +99,6 @@ def main():
     ap.add_argument("--to", dest="last", default="18:00", help="... to this one (exclusive)")
     ap.add_argument("--before", type=int, default=15, help="minutes of the slice before the peak's 5-min window")
     ap.add_argument("--after", type=int, default=30, help="minutes of the slice after that window's start")
-    ap.add_argument("--whole-feed", action="store_true", help="replay all exchanges also for FR, NL and ETR")
     ap.add_argument("--taskmanagers", type=int, default=4)
     ap.add_argument("--parallelism", type=int, default=4)
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
@@ -126,8 +125,7 @@ def main():
     points = []
     for p in peaks:
         start, end = slice_bounds(p["minute"], a.before, a.after)
-        meta = workload.extract(a.data_dir, profiles[p["day"]], p["day"], start, end,
-                                "all" if a.whole_feed else p["scope"], log)
+        meta = workload.extract(a.data_dir, profiles[p["day"]], p["day"], start, end, p["scope"], log)
         log(f"   {meta['file']}: {meta['rows']:,} rows, {meta['dropped_ahead']} ahead of the feed clock left out")
         for speed in speeds:
             points.append((f"{p['scope']} {'max' if speed == 0 else f'{speed:g}x'}",

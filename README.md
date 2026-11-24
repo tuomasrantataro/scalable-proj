@@ -9,10 +9,10 @@ Detecting trading trends in the DEBS 2022 tick data: Kafka → Flink → Timesca
 | `kafka` | Apache Kafka 4.3.2, one broker in KRaft mode (`kafka:9092` inside Compose, `localhost:9094` from the host) |
 | `kafka-setup` | One-shot: creates the input topic `ticks` (8 partitions, `KAFKA_PARTITIONS`) and the output topic `advisories` (4 partitions, `KAFKA_ADVISORIES_PARTITIONS`; BUY/SELL advisories as JSON, keyed by symbol; Kafka timestamp = broker append time). Existing topics are kept. |
 | `jobmanager` | Flink 2.3.0, standalone application mode, runs `scalable.flink.TradingJob` (UI: http://localhost:8081) |
-| `taskmanager` ×4 | `TASKMANAGERS` (4) containers with `TASK_SLOTS` (1) slots each; job parallelism `PARALLELISM` (4; the source can use up to the partition count of the input topic) |
+| `taskmanager` ×2 | `TASKMANAGERS` (2) containers with `TASK_SLOTS` (1) slots each; job parallelism `PARALLELISM` (2; the source can use up to the partition count of the input topic) |
 | `timescaledb` | TimescaleDB 2.31 (PostgreSQL 17), [schema](config/timescaledb/init.sql): `ema_window` + view `advisories`, `data_issue` + view `data_issue_summary` |
 | `db-setup` | One-shot: applies the idempotent schema (also to an existing database volume) |
-| `replay-producer` | Sends CSV rows to the input topic, one record per row with the symbol ID as key, partitioned by symbol (Rust with librdkafka, `producer-rs/`; lz4-compressed batches, 8 sender threads). Not started by `docker compose up` (Compose profile `producer`); the scripts below run it. |
+| `replay-producer` | Sends CSV rows to the input topic, one record per row with the symbol ID as key, partitioned by symbol (Rust with librdkafka, `producer-rs/`; lz4-compressed batches, 4 sender threads). Not started by `docker compose up` (Compose profile `producer`); the scripts below run it. |
 | `advisory-latency` | Profile `latency`: reads topic `advisories` like a trader's system and prints each message with its receive time; started and evaluated by `bench/advisory_latency.py` |
 | `grafana` | Dashboards at http://localhost:3001 (admin/admin; anonymous viewers allowed): Trading trends, Correctness and data quality, System metrics ([architecture §5.1](docs/architecture.md#51-grafana-dashboards)) |
 | `prometheus`, `cadvisor` | Metrics: Flink Prometheus reporter (port 9249 on every Flink container) and CPU/memory per container. Prometheus UI: http://localhost:9090 |
@@ -140,7 +140,10 @@ Correctness: compare the job's results in TimescaleDB with the pandas reference,
 ```bash
 reference/.venv/bin/python reference/compare.py                        # after a whole-week run
 reference/.venv/bin/python reference/compare.py --through 2021-11-08   # after a run of day 8 only
+python3 bench/check_delivery.py                                        # delivered advisories, after a whole-week run
 ```
+
+Every measurement for the report, step by step: [FINAL_MEASUREMENTS.md](FINAL_MEASUREMENTS.md).
 
 What can be scaled:
 
@@ -150,7 +153,7 @@ What can be scaled:
 | Slots per TaskManager | `--slots N` (`TASK_SLOTS`) | TaskManagers × slots must be ≥ parallelism |
 | Job parallelism | `--parallelism N` (`PARALLELISM`) | all operators; the source uses at most one subtask per partition |
 | Kafka partitions of the input | `load --partitions N` | the only one that needs a new `load`; upper bound for source parallelism |
-| Producer threads (live runs only) | `PRODUCER_THREADS=N scripts/run-live.sh` | 8 by default; see MEASUREMENTS.md §3 |
+| Producer threads (live runs only) | `PRODUCER_THREADS=N scripts/run-live.sh` | 4 by default; see MEASUREMENTS.md §3 |
 | Kafka broker, TimescaleDB | – | single instances in this setup |
 
 For comparable benchmarks, change one thing at a time on the same loaded events, and compare runs on the same host
@@ -196,8 +199,8 @@ Flink unit tests run in the image build (`docker compose build jobmanager`).
 
 Options are set with env vars: `KAFKA_PARTITIONS` (8) and `KAFKA_RETENTION_MS` (-1 = keep forever), used only
 when `kafka-setup` creates the topic; `REPEAT`, `RATE`, `KAFKA_COMPRESSION` (lz4), `KAFKA_LINGER_MS` (20) and
-`PRODUCER_THREADS` (8) for the producer; `DATA_DIR` (default `./docs`); `TASKMANAGERS` (4), `TASK_SLOTS` (1),
-`PARALLELISM` (4), `KAFKA_TOPIC` (`ticks`), `KAFKA_GROUP` (`flink`),
+`PRODUCER_THREADS` (4) for the producer; `DATA_DIR` (default `./docs`); `TASKMANAGERS` (2), `TASK_SLOTS` (1),
+`PARALLELISM` (2), `KAFKA_TOPIC` (`ticks`), `KAFKA_GROUP` (`flink`),
 `KAFKA_MAX_POLL_RECORDS` (5000), `CHECKPOINT_INTERVAL` (default `10 s`), `OUT_OF_ORDERNESS_S` (1), `IDLENESS_S`
 (10), `JDBC_BATCH_SIZE` (1000), `JDBC_URL` (with `reWriteBatchedInserts=true`), `EMA_SINK` (`jdbc`; `discard` does not write
 `ema_window`, only for measuring the cost of the database) and `WATERMARK_ALIGNMENT_S` (300; pauses a partition that is that far ahead in event time, see

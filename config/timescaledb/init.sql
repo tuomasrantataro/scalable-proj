@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS ema_window (
     PRIMARY KEY (symbol, window_end)
 );
 SELECT create_hypertable('ema_window', by_range('window_end', INTERVAL '1 day'), if_not_exists => TRUE);
-ALTER TABLE ema_window ADD COLUMN IF NOT EXISTS fired_at timestamptz;   -- for databases created before it
 
 CREATE OR REPLACE VIEW advisories AS
 SELECT symbol, advisory AS type, window_start, window_end, window_end AS due_at, close, ema38, ema100,

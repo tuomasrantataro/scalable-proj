@@ -36,8 +36,9 @@ x-flink-env: &flink-env
   FLINK_PROPERTIES: |
     jobmanager.rpc.address: jobmanager
     taskmanager.numberOfTaskSlots: ${TASK_SLOTS:-1}
-    # PARALLELISM: the source can use up to the partition count of `ticks` (8)
-    parallelism.default: ${PARALLELISM:-4}
+    # Defaults (2 TaskManagers x 1 slot, parallelism 2, 4 producer threads) are sized for 8 cores and 16 GB of memory.
+    # The source can use up to the partition count of `ticks` (8)
+    parallelism.default: ${PARALLELISM:-2}
     # Heap (HashMap) state backend: keyed state lives as Java objects on the TaskManager heap. State is
     # small (per symbol: EMAs plus the open window), so RocksDB's disk spill and serialization are not needed.
     state.backend.type: hashmap
@@ -156,7 +157,7 @@ services:
     image: scalable/flink-job
     command: taskmanager
     deploy:
-      replicas: ${TASKMANAGERS:-4}   # TASKMANAGERS x TASK_SLOTS must be at least PARALLELISM
+      replicas: ${TASKMANAGERS:-2}   # TASKMANAGERS x TASK_SLOTS must be at least PARALLELISM
     environment:
       <<: *flink-env
       SERVICE: taskmanager
@@ -187,7 +188,7 @@ services:
       KAFKA_LINGER_MS: ${KAFKA_LINGER_MS:-20}
       # Sender threads. librdkafka reads the clock for every record, a system call on this laptop (HPET clock
       # source), so one thread sends only ~250k records/s (MEASUREMENTS.md).
-      PRODUCER_THREADS: ${PRODUCER_THREADS:-8}
+      PRODUCER_THREADS: ${PRODUCER_THREADS:-4}
     volumes:
       - ${DATA_DIR:-./docs}:/data:ro
     depends_on:

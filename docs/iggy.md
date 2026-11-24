@@ -2,7 +2,7 @@
 
 From 2026-11-16 to 2026-11-20 the message broker was **Apache Iggy 0.10.0**, read and written by Flink through the
 official connector `org.apache.iggy:flink-connector:0.10.0`. On 2026-11-20 it was replaced by **Apache Kafka**
-(see [`architecture.md`](architecture.md) §1.1 and [`MEASUREMENTS.md`](../MEASUREMENTS.md)). This file keeps
+(see [`architecture.md`](architecture.md) and [`MEASUREMENTS.md`](../MEASUREMENTS.md)). This file keeps
 what was tested and measured with Iggy. The code is in the git history before the switch.
 
 ## 1. What was used
@@ -29,12 +29,12 @@ depend on exactly those parts.
 | **One watermark per reader, not per partition**, so the `ticks` topic had to have 1 partition. | With 4 partitions **54% of the price events arrived late** and half the windows were lost; results differed between runs (§4, Finding 1). | One watermark per partition (split). Full week with 8 partitions: output identical to the Iggy 1-partition run ([MEASUREMENTS.md](../MEASUREMENTS.md)). |
 | **At-most-once delivery.** Offsets are committed to Iggy when a batch is polled; the offsets in the Flink checkpoint are not used for reading. | A TaskManager kill lost **1.0–1.5% of a day's price events** (§4, Finding 2). | Offsets are part of the checkpoint; a restore re-reads from them. Measured: 2 TaskManager kills, 0 events lost, results identical to a run without failure ([MEASUREMENTS.md](../MEASUREMENTS.md) §4). |
 | **Failover not reliable.** Without checkpointing, `addSplitsBack` loses the splits; with it, 1 of 7 failovers still left the job RUNNING but reading nothing. | §3, §4 Finding 3. | Both failovers recovered ([MEASUREMENTS.md](../MEASUREMENTS.md) §4). |
-| **An idle reader busy-polls** (`isAvailable()` always returns a completed future). | Each idle reader used about **one core** doing nothing (§3, §5). This also ruled out a runtime `subscriptions` topic (architecture §3.6). | Every reader has partitions (8 partitions, 4 readers); a reader without data waits instead of polling. |
+| **An idle reader busy-polls** (`isAvailable()` always returns a completed future). | Each idle reader used about **one core** doing nothing (§3, §5). This also ruled out a runtime `subscriptions` topic. | Every reader has partitions (8 partitions, 4 readers); a reader without data waits instead of polling. |
 | **The sink picks one partition per batch** and flushes a partial batch only at a checkpoint. | `advisories` had to have 1 partition and batch size 1. | Partition per record from its key (the symbol), records sent at once (`linger.ms=0`). |
 | **Immature ecosystem.** | The connector logged every message at INFO; no broker metrics without a token; the Rust SDK read the clock per message (§4, Producer). | Widely used connector and tools (`kafka-consumer-groups.sh` for lag, console consumer). |
 
 Writing a custom Iggy source (explicit offsets in checkpoint state, per-split watermarks, deterministic split
-assignment) was the planned fallback (architecture §7). Switching to Kafka gave all of this with a maintained
+assignment) was the planned fallback (in an earlier version of the architecture). Switching to Kafka gave all of this with a maintained
 connector, at the cost of rewriting the producer, the topic setup and the source/sink code.
 
 ## 3. Connector findings and first throughput test
@@ -81,7 +81,7 @@ More notes from reading the connector source:
 Conclusion: the connector works with several Flink nodes, but source reading does not scale out (one reader
 gets all partitions) and it is not exactly-once. To get parallel reading and exactly-once, use a fixed
 enumerator (assign splits round-robin as readers register, and seek to the checkpointed offset) or the
-custom-source fallback from architecture.md §7.
+custom-source fallback planned then.
 
 ## 4. Measurements (former MEASUREMENTS.md, 2026-11-16 to 2026-11-18)
 
@@ -364,7 +364,7 @@ Earlier, before the producer batched per partition, it sent about one message pe
 - The reader drains ran 3 times (once per full-day run) and the producer comparison 3 rounds per variant.
   Every other configuration ran once.
 - CPU values are single samples, not averages.
-- Messages are CSV text, not the binary format planned in architecture.md §3.1.
+- Messages are CSV text, not the binary format planned then.
 
 ## 5. Last full-week run with Iggy (2026-11-20)
 

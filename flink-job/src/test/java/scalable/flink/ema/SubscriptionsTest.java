@@ -31,9 +31,7 @@ class SubscriptionsTest {
         assertEquals(List.of("alice", "bob"), s.tradersOf("PX1.FR"));
         assertEquals(List.of("alice"), s.tradersOf("623100.ETR"));
         assertTrue(s.tradersOf("OTHER.NL").isEmpty());
-        assertEquals(2, s.traderCount());
         assertEquals(6, s.subscriptionCount());
-        assertEquals(4, s.symbolCount());
     }
 
     @Test
@@ -41,7 +39,6 @@ class SubscriptionsTest {
         Subscriptions s = parse("all: *", "bob: ASML.NL", "both: * ASML.NL");
         assertEquals(List.of("all", "bob", "both"), s.tradersOf("ASML.NL"));
         assertEquals(List.of("all", "both"), s.tradersOf("ANY.FR"));
-        assertEquals(2, s.wildcardTraderCount());
     }
 
     @Test
@@ -54,7 +51,7 @@ class SubscriptionsTest {
     @Test
     void emptyFileMeansNoDeliveries() {
         Subscriptions s = parse("# nobody yet");
-        assertEquals(0, s.traderCount());
+        assertEquals(0, s.subscriptionCount());
         assertTrue(s.tradersOf("ASML.NL").isEmpty());
     }
 

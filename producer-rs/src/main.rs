@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::mpsc::{Receiver, sync_channel};
 use std::time::{Duration, Instant};
 
-use rdkafka::admin::{AdminClient, AdminOptions, AlterConfig, NewTopic, ResourceSpecifier, TopicReplication};
+use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::client::{ClientContext, DefaultClientContext};
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
@@ -126,8 +126,7 @@ fn main() -> Res<()> {
 /// minutes after they are written.
 const ADVISORY_TIMESTAMP: (&str, &str) = ("message.timestamp.type", "LogAppendTime");
 
-/// Creates both topics if they do not exist. An existing topic is kept as is, even with another partition count;
-/// only the timestamp type of `advisories` is set on it.
+/// Creates both topics if they do not exist. An existing topic is kept as is, even with other settings.
 fn setup(cfg: &Config) -> Res<()> {
     let admin: AdminClient<DefaultClientContext> =
         ClientConfig::new().set("bootstrap.servers", &cfg.bootstrap).create()?;
@@ -155,13 +154,6 @@ fn setup(cfg: &Config) -> Res<()> {
             Err((name, RDKafkaErrorCode::TopicAlreadyExists)) => log!("topic {name} exists, kept as is"),
             Err((name, code)) => return Err(format!("creating topic {name}: {code}").into()),
         }
-    }
-    // An advisories topic created before LogAppendTime was introduced. (A non-incremental AlterConfigs replaces
-    // all dynamic settings of the topic; this topic has no others.)
-    let alter = AlterConfig::new(ResourceSpecifier::Topic(&cfg.advisories_topic))
-        .set(ADVISORY_TIMESTAMP.0, ADVISORY_TIMESTAMP.1);
-    for r in futures::executor::block_on(admin.alter_configs([&alter], &opts))? {
-        r.map_err(|(_, code)| format!("setting {} on {}: {code}", ADVISORY_TIMESTAMP.0, cfg.advisories_topic))?;
     }
     let probe: BaseProducer = ClientConfig::new().set("bootstrap.servers", &cfg.bootstrap).create()?;
     for name in [&cfg.topic, &cfg.advisories_topic] {

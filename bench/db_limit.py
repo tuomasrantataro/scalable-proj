@@ -41,7 +41,6 @@ from backlog import ROOT, log, sh, sql
 from measure import markdown, number
 
 SUBSCRIPTIONS = "/config/subscriptions.txt"     # the default: the database is the subject, not the fan-out
-CLOSE_S = 300
 WRITER = "timescaledb_ema:_Writer"
 
 

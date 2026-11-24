@@ -118,21 +118,9 @@ public final class Subscriptions implements Serializable {
         return both;
     }
 
-    public int traderCount() {
-        return traders;
-    }
-
     /** Number of (trader, symbol) pairs, counting '*' once per trader. */
     public int subscriptionCount() {
         return subscriptions;
-    }
-
-    public int symbolCount() {
-        return bySymbol.size();
-    }
-
-    public int wildcardTraderCount() {
-        return allSymbols.size();
     }
 
     @Override
