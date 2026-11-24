@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import advisory_latency
 from backlog import flink_job, group_lag, kafka, log, memory, prom_series, reset, sh, sql, start_job, subtask_skew, task_times
 from latency_sweep import advisory_count, window_latency
+import stability
 
 TOPIC = "bench-replay"
 SCRAPE_S = 5            # Prometheus scrape interval (config/prometheus/prometheus.yml)
@@ -116,7 +117,8 @@ def wait_processed(group, stable, timeout=1800):
             raise RuntimeError(f"timeout waiting for the job: output={state}")
 
 
-def replay(slice_meta, slices_dir, speed, subscriptions_file, taskmanagers, parallelism, settings, stable):
+def replay(slice_meta, slices_dir, speed, subscriptions_file, taskmanagers, parallelism, settings, stable,
+           producer_env=None):
     """Resets the system and replays the slice at `speed` times the feed's pace (0 = producer maximum)."""
     group = f"replay-{datetime.now(timezone.utc):%Y%m%dT%H%M%S}"
     kafka("kafka-topics.sh", f"--delete --if-exists --topic {TOPIC}")
@@ -132,7 +134,7 @@ def replay(slice_meta, slices_dir, speed, subscriptions_file, taskmanagers, para
 
     out = sh("docker compose run --rm --no-deps replay-producer", env={
         "DATA_DIR": str(slices_dir), "CSV_FILE": f"/data/{slice_meta['file']}", "SPEEDUP": str(speed),
-        "RATE": "0", "REPEAT": "1", "START_TIME": "", "END_TIME": ""})
+        "RATE": "0", "REPEAT": "1", "START_TIME": "", "END_TIME": "", **(producer_env or {})})
     t_end = time.time()
     m = re.search(r"sent (\d+) messages .*first to last row sent: ([\d.]+) s", out)
     if not m:
@@ -156,6 +158,7 @@ def replay(slice_meta, slices_dir, speed, subscriptions_file, taskmanagers, para
         "advisories": stop_consumer(), "window_ms": window_latency(), "cold_window_ms": window_latency(cold=True),
         "initial_advisories": int(sql("SELECT count(*) FROM ema_window WHERE initial AND advisory IS NOT NULL AND "
                                       "window_end > (SELECT min(window_end) FROM ema_window)")),
+        "stability": stability.collect(),
     }
     return point
 

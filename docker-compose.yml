@@ -19,9 +19,10 @@ x-flink-env: &flink-env
   KAFKA_GROUP: ${KAFKA_GROUP:-flink}
   KAFKA_MAX_POLL_RECORDS: ${KAFKA_MAX_POLL_RECORDS:-5000}
   REPORT_INTERVAL_MS: ${REPORT_INTERVAL_MS:-5000}
-  JDBC_URL: jdbc:postgresql://timescaledb:5432/trading
+  JDBC_URL: ${JDBC_URL:-jdbc:postgresql://timescaledb:5432/trading?reWriteBatchedInserts=true}   # multi-row upserts (MEASUREMENTS.md §12)
   JDBC_USER: postgres
   JDBC_PASSWORD: postgres
+  EMA_SINK: ${EMA_SINK:-jdbc}         # discard = no ema_window rows, only to measure what the database costs (bench/db_limit.py)
   JDBC_BATCH_SIZE: ${JDBC_BATCH_SIZE:-1000}         # rows per upsert batch of the TimescaleDB sinks
   OUT_OF_ORDERNESS_S: ${OUT_OF_ORDERNESS_S:-1}   # may be fractional (architecture §3.4)
   IDLENESS_S: ${IDLENESS_S:-10}       # 0 = no idleness

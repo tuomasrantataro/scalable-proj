@@ -114,12 +114,13 @@ updated after every run:
 
 ```bash
 python3 bench/scaling_matrix.py      # configurations × 3 repeats of `backlog.py run`: median, spread, speedup, efficiency
-python3 bench/subscriber_sweep.py    # 1 to 1,000 traders with generated subscriptions; checks every delivery
+python3 bench/subscriber_sweep.py    # 1 to 100 traders (every symbol); checks every delivery
 python3 bench/peak_test.py           # busiest minute overall and per exchange, at 10x, 30x, 100x and maximum speed
 python3 bench/peak_test.py --find    # only find the busiest minutes
+python3 bench/db_limit.py realistic  # database load at real traffic; also `bursts` and `saturation`: where it becomes the limit
 ```
 
-`scaling_matrix.py` needs the loaded events (step 2); the other two replay slices cut from the CSV files
+`scaling_matrix.py` and `db_limit.py saturation` need the loaded events (step 2); the others replay slices cut from the CSV files
 ([`bench/workload.py`](bench/workload.py), kept in `data/slices`).
 
 Long tail: each `run` records how evenly the load is spread (records per partition, records and busy time per subtask,
@@ -198,7 +199,8 @@ when `kafka-setup` creates the topic; `REPEAT`, `RATE`, `KAFKA_COMPRESSION` (lz4
 `PRODUCER_THREADS` (8) for the producer; `DATA_DIR` (default `./docs`); `TASKMANAGERS` (4), `TASK_SLOTS` (1),
 `PARALLELISM` (4), `KAFKA_TOPIC` (`ticks`), `KAFKA_GROUP` (`flink`),
 `KAFKA_MAX_POLL_RECORDS` (5000), `CHECKPOINT_INTERVAL` (default `10 s`), `OUT_OF_ORDERNESS_S` (1), `IDLENESS_S`
-(10), `JDBC_BATCH_SIZE` (1000) and `WATERMARK_ALIGNMENT_S` (300; pauses a partition that is that far ahead in event time, see
+(10), `JDBC_BATCH_SIZE` (1000), `JDBC_URL` (with `reWriteBatchedInserts=true`), `EMA_SINK` (`jdbc`; `discard` does not write
+`ema_window`, only for measuring the cost of the database) and `WATERMARK_ALIGNMENT_S` (300; pauses a partition that is that far ahead in event time, see
 [architecture §3.4](docs/architecture.md#34-watermarks-and-late-events-nfr-7)) for the job;
 `SKEW_REPORT_S` (3600) and `PRICE_JUMP_REPORT` (0.10) for the data quality report, and `SUBSCRIPTIONS_FILE`
 (`/config/subscriptions.txt`).

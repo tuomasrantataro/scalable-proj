@@ -2,7 +2,7 @@
 
 How to run every measurement the report needs, from an empty system (part A), and how to repeat single measurements
 without starting over (part B). Results and their interpretation are in [`MEASUREMENTS.md`](MEASUREMENTS.md) (current:
-§7), the requirement in [`docs/requirements.md`](docs/requirements.md) §5.2 (D-3). All commands run in the repo root.
+§7–§12), the requirement in [`docs/requirements.md`](docs/requirements.md) §5.2 (D-3). All commands run in the repo root.
 
 | Report topic | Measurement | Step | Time (estimate) |
 |---|---|---|---|
@@ -10,13 +10,14 @@ without starting over (part B). Results and their interpretation are in [`MEASUR
 | Throughput under load | Stored week at full speed; live run | A5, A6, A11 | 5 + 80 + 6 min |
 | Latency under load | Load/latency sweep, real time to maximum; delay from the window's end | A8 | 65 min (15 min without 1× and 3×), repeats 25 min, delay 45 min |
 | Scalability, resources (CPU, memory) | Scaling matrix | A6 | 80 min |
-| Scalability, exchanges and peak rates | Peak test: all, FR, NL, ETR | A9 | 65 min |
-| Scalability, subscribers | Subscriber sweep | A10 | 25 min |
+| Scalability, exchanges and peak rates | Peak test: all, FR, NL, ETR | A9 | 80 min |
+| Scalability, subscribers | Subscriber sweep | A10 | 40 min |
+| Scalability, database | Load of the single database at real traffic; rows and events/s at which it becomes the limit | A10b | 95 min |
 | Long-tail distribution | Symbol distribution (offline); uniform workload | A3, A7 | 2 + 45 min |
 | Event types | Data issue summary | A5 | in A5 |
 
-The whole of part A takes about 7 hours, most of it unattended. `scaling_matrix.py`, `peak_test.py`,
-`subscriber_sweep.py` and the uniform workload had **not been run end to end** when this was written: do the smoke tests
+The whole of part A takes about 9.5 hours, most of it unattended. `scaling_matrix.py`, the exchange scopes of `peak_test.py`
+and the uniform workload had **not been run end to end** when this was written: do the smoke tests
 (A4) first.
 
 ## Rules
@@ -90,14 +91,15 @@ reference/.venv/bin/python reference/compare.py --through 2021-11-08            
 
 python3 bench/scaling_matrix.py --configs 4x1 --repeats 1 --name smoke
 python3 bench/peak_test.py --scopes ETR --speeds 100 --days 08 --name smoke
-python3 bench/subscriber_sweep.py --traders 1 --speed 100 --name smoke
+python3 bench/subscriber_sweep.py --traders 1 --day 08 --start 09:00 --end 09:30 --speed 100 --name smoke
 ```
 
 Check in the output:
 - `backlog.py`: the lines `memory MB` and `skew` have values.
 - `scaling_matrix.py`: one valid run with `digest` `a7ed875d2291c71a8151275953a15be4` (8 Nov only, 1 s bound; at 60 s it was `fffd77b9…`).
 - `peak_test.py`: a lag with samples, busy times, and a verdict other than `n/a`.
-- `subscriber_sweep.py`: no "deliveries differ" warning.
+- `subscriber_sweep.py`: no "deliveries differ" warning and no `few!` or `spill!` mark.
+
 
 Delete the smoke results, so they do not get into the report: `rm -r bench/results/*/*-smoke`.
 
@@ -213,18 +215,49 @@ systemd-inhibit --what=idle:sleep:handle-lid-switch python3 bench/peak_test.py -
 Finds the busiest minute of the week for all exchanges together, FR, NL and ETR, and replays 45 minutes around each at
 10×, 30×, 100× and maximum. Scans the files first (about 1 min per day in parallel; kept in `data/slices`). Report
 `summary.md` in `bench/results/peak_test/<time>-final/`: real peak rates, verdict, lag, CPU, memory (in
-`results.jsonl`) and latency. At maximum speed the verdict may be `n/a` (too short for three lag samples); a longer
-slice helps: `--scopes all --speeds 100,300 --before 60 --after 60 --name long`.
+`results.jsonl`) and latency. At maximum speed the verdict may be `n/a` (too short for three lag samples).
+
+Sustained load, about 15 min: the whole session of the busiest day (10 Nov 09:00–17:30, a 5 GB slice in `data/slices`), at 100×
+(306 s), 300× (102 s) and maximum (58 s):
+
+```bash
+systemd-inhibit --what=idle:sleep:handle-lid-switch python3 bench/peak_test.py --scopes all --speeds 100,300,0 \
+    --before 390 --after 120 --name session
+reference/.venv/bin/python bench/stability.py plot bench/results/peak_test/<time>-session    # latency over time, PNG
+```
+
+Report the percentiles per third of the run (`summary.md`, last column; the plots), and the window latency (309,000 samples)
+next to the advisory latency (868). At maximum speed the producer sets the rate, so `keeps up` is no capacity limit of the job.
 
 ## A10. Subscribers
 
 ```bash
-systemd-inhibit --what=idle:sleep:handle-lid-switch python3 bench/subscriber_sweep.py --name final
+systemd-inhibit --what=idle:sleep:handle-lid-switch python3 bench/subscriber_sweep.py --name final-all
+systemd-inhibit --what=idle:sleep:handle-lid-switch python3 bench/subscriber_sweep.py --mode sample --traders 100,1000 --name final-sample
 ```
 
-1, 10, 100 and 1,000 traders with 50 symbols each. Worst case, every trader following every symbol:
-`--mode all --traders 1,10,100 --name all`. Report `summary.md` in `bench/results/subscriber_sweep/<time>-final/`. If
-`stored → received` grows with the traders, the single consumer is the limit, not the pipeline.
+The worst case is the main run: 1, 10 and 100 traders following every symbol (10 Nov 09:00–12:00 at 30×, about 7 min per
+point). The sample mode (50 symbols each) needs many traders for enough messages. Report `summary.md` in
+`bench/results/subscriber_sweep/<time>-final-*/`: steady messages (column `Steady messages (closes)`: 657 per trader in mode
+all), latency and deliveries. Points marked `few!` or `spill!` are not usable for steady percentiles (`MEASUREMENTS.md` §11). If
+`stored → received` grows with the traders, the single consumer may be the limit, not the pipeline.
+
+## A10b. The database
+
+```bash
+systemd-inhibit --what=idle:sleep:handle-lid-switch python3 bench/db_limit.py realistic --name final-realistic      # 49 min
+systemd-inhibit --what=idle:sleep:handle-lid-switch python3 bench/db_limit.py bursts --name final-bursts            # 28 min
+systemd-inhibit --what=idle:sleep:handle-lid-switch python3 bench/db_limit.py saturation --name final-saturation    # 16 min
+```
+
+`realistic`: real mix around the week's busiest minute at real time and 10×, and the whole session at 100×, 300× and maximum. Shows that the database is
+idle at real traffic (writer busy, backpressure 0%, close stored within about 1 s). `bursts`: up to 80,000 symbols per close.
+`saturation`: the stored week with and without the database, then two uniform workloads. **It replaces the topic `ticks-uniform`** (one day, 40,000
+symbols), so run it after A7; repeat A7's `load` before any further uniform run. `ticks` is kept, but must hold the week (A5).
+
+Report `summary.md` in `bench/results/db_limit/<time>-final-*/`, and the capacity in rows/s, not only in events/s: the limit in events/s is the capacity
+times the events per row of the mix (`MEASUREMENTS.md` §12). The values `without database` need `EMA_SINK=discard`: nothing is written then, so such
+runs have no digest. Do not read the `Rows/s` of the paced points as a capacity: they are the load.
 
 ## A11. Live run (the whole system at once)
 
@@ -233,6 +266,13 @@ SUBSCRIPTIONS_FILE=/config/subscriptions-all.txt systemd-inhibit --what=idle:sle
 reference/.venv/bin/python reference/compare.py                    # identical
 ```
 
+Record the latency over the run before anything else empties the table (per trading day, per 5 s, lag; with a plot):
+
+```bash
+reference/.venv/bin/python bench/stability.py record --name live-all
+```
+
+This is the sustained case of the report: 1.1 M events/s for about 4 min. Name the spikes as start-up and nights (`MEASUREMENTS.md` §10).
 Then the delivery check of A5 with `SUBS=config/subscriptions-all.txt` (expected: 11,349 messages, 0 missing, 0
 unexpected). Every symbol is subscribed here, so delivery is checked for all of them and the latency has 11,337 samples
 instead of 72; A5 keeps the default file, which shows the filtering (FR-4). Compare the latency only with runs that have the
@@ -248,9 +288,11 @@ trends, Correctness) and the run's system metrics.
 | Latency | `bench/results/latency_sweep/<time>-final/` (+ `-final-rep*`) |
 | Delay from the window's end | `bench/results/window_delay/<time>-final/summary.md` |
 | Exchanges, peaks | `bench/results/peak_test/<time>-final/summary.md` |
-| Subscribers | `bench/results/subscriber_sweep/<time>-final/summary.md` |
+| Subscribers | `bench/results/subscriber_sweep/<time>-final-*/summary.md` |
+| Database: load and limit | `bench/results/db_limit/<time>-final-*/summary.md` |
 | Long tail | `bench/results/symbol_distribution/summary.md`, `symbols.csv` |
 | Live run | last line of `bench/results/advisory_latency.jsonl`; CPU and memory from Grafana |
+| Stability over time | `bench/results/peak_test/<time>-session/` (`summary.md`, PNGs), `bench/results/stability/<time>-live-all/` |
 
 Commit `bench/results`, then update `MEASUREMENTS.md`. Say in the report: everything runs on one host; latency in A8 to A11
 starts when a window fires, so it leaves out the out-of-orderness wait (1 s); the time from the window's end is in A8
@@ -288,7 +330,7 @@ starts when a window fires, so it leaves out the out-of-orderness wait (1 s); th
 | Uniform workload | `python3 bench/backlog.py run --workload uniform` | `ticks-uniform` |
 | Latency sweep, some points | `python3 bench/latency_sweep.py --end 09:36 --speeds 100,0 --name again` | CSV files |
 | Peak test, one exchange | `python3 bench/peak_test.py --scopes NL --speeds 100 --name nl` | CSV files (slice reused) |
-| Subscribers, one point | `python3 bench/subscriber_sweep.py --traders 1000 --name t1000` | CSV files (slice reused) |
+| Subscribers, one point | `python3 bench/subscriber_sweep.py --mode sample --traders 1000 --name t1000` | CSV files (slice reused) |
 | Live run | `scripts/run-live.sh` | CSV files |
 | Comparison with the reference | `reference/.venv/bin/python reference/compare.py` | results of a full-week run in the tables |
 | Comparison with a saved result | `reference/.venv/bin/python reference/compare.py --export /tmp/ema_window.csv` | the file of A5 |

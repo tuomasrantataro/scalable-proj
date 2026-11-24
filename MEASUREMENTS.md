@@ -4,7 +4,8 @@ Measurements of the Kafka → Flink → TimescaleDB pipeline. Until 2026-11-20 t
 measurements, the connector findings and the reasons for replacing it are in [`docs/iggy.md`](docs/iggy.md).
 
 **The current results are in §7** (2026-11-23: full week, correctness, latency, skew, memory). §1–§6 are the earlier
-measurements; where a later finding changes them, a note says so.
+measurements; where a later finding changes them, a note says so. §8–§12 are from 2026-11-24. Since §12 the job writes multi-row
+upserts by default, and the full week from a stored backlog takes a third less time: **the backlog times, writer load and latency at saturation of §1–§11 are those of the old setting.**
 
 ## Setup
 
@@ -160,6 +161,8 @@ slowest; all aligned runs below give exactly the reference results. Its cost is 
 (153 s aligned vs 138–158 s without).
 
 ### Scaling: TaskManagers = parallelism (aligned, whole week)
+
+*Before the multi-row upserts of §12, so the writer limit described here is no longer the current one. To be repeated (A6).*
 
 **Outdated in two ways:** these runs are from before the `ema_window` sink got its own task (§6), and the busy and
 backpressured times come from a gauge that overstates them (§7). Times, digests and CPU are as measured, one run each.
@@ -409,8 +412,8 @@ Cold start (the first close, 3,652 advisories in the sweep) p50 / max: 10× 235 
 - **Likely cause of the saturated latency (inferred, not tested):** the writer cannot keep up, its input buffers fill,
   and the EMA task, which sends to the writer and to the advisory branch, blocks on it. Windows then queue in front of
   it. The measurements fit: the delay is almost all before the EMA result, and the EMA task is 2% busy but 56–62%
-  backpressured. Own task or not (§6), the database delays advisories once the buffers are full. Repeating the
-  run with the sink discarded would test it.
+  backpressured. Own task or not (§6), the database delays advisories once the buffers are full. *Tested in §12:* without the
+  database the EMA task is never backpressured, and faster upserts cut the saturated p50 from 533–763 to 27–76 ms.
 - All values start when the window fires, so they exclude the out-of-orderness wait (60 s in these runs). §8 includes it.
 
 ### Skew
@@ -469,8 +472,9 @@ would include it.
 - In `bench/results/backlog_runs.jsonl`, `backlog-20261123T201209` (busy time) and `backlog-20261123T201654` (memory)
   are one-day test runs from before these corrections; do not use them.
 
-Not run yet: `scaling_matrix.py`, `peak_test.py`, `subscriber_sweep.py`, the uniform workload and the real-time (1×)
-sweep point. So scaling, per-exchange load and subscriber growth have no current results.
+Not run when this was written: `scaling_matrix.py`, the uniform workload, the exchange scopes of `peak_test.py`
+and the real-time (1×) sweep point. So scaling and per-exchange load have no current results. (The sustained
+session, the delay at 1× and the subscribers were run later: §10, §8, §11.)
 
 ## 8. Out-of-orderness bound (2026-11-24): 60 s → 1 s
 
@@ -497,7 +501,8 @@ Full week, `WEEK_DIGEST` and 5,506 late events in every run:
 - Durations (125.9–135.1 s) are not comparable: the first runs were made partly on battery power.
 - `fired → received` p50 / p95 / max: 13 / 1,676 / 1,967 ms (D = 1 s) and 23 / 1,468 / 1,537 ms (0.5 s), against
   29 / 790 / 1,064 ms in §7 (60 s), one run and 72 samples each. Four more live runs at 1 s (§9) had p95 854–1,360 ms, so one
-  run at 60 s cannot show whether 1 s made the tail higher. That needs repeated runs at 60 s.
+  run at 60 s cannot show whether 1 s made the tail higher. §10 shows where the tail of a live run comes from: the first
+  10 s and the nights, not the trading hours.
 
 ### Delay in market time
 
@@ -558,6 +563,183 @@ Per-run values, default → all. Latencies exclude the first close:
 - **Unclear: p95 at saturation.** It was higher in 2 of the 3 backlog runs with every symbol, and lower than in every default
   run in the third, so it may be noise. Three runs cannot rule out a small effect. The live runs show no slowdown, but the two
   runs per setting differ a lot (824 and 1,624 ms in the default setting).
+
+## 10. Stability of the latency under sustained load (2026-11-24)
+
+[`bench/stability.py`](bench/stability.py) follows window `fired → EMA result` over the run, from `ema_window` (5 s bins; per third
+or per trading day; consumer lag; plot). It is stored with every point of `peak_test.py` and `subscriber_sweep.py`
+and recorded for a live run with `stability.py record`. The first window close is left out everywhere, as before.
+
+### Paced session: flat up to the producer's maximum
+
+10 Nov 09:00–17:30 (62.75 M rows, the day of the week's busiest minute), 4x1, D = 1 s, every symbol subscribed, one run
+per speed (`bench/results/peak_test/20261124T113849-session/`, with plots). Window `fired → EMA result`:
+
+| Speed | Events/s (average) | Duration | p95 per third of the run (ms) | p50 / p95 / p99 / max, all windows (ms) | Lag max (records) | CPU TaskManagers, writer busy |
+|---|---:|---:|---|---|---:|---|
+| 100× | 205,065 | 306 s | 77 → 68 → 98 | 2 / 78 / 99 / **101** | 0 | 64%, 5 ms/s |
+| 300× | 615,196 | 102 s | 89 → 68 → 68 | 2 / 73 / 95 / **103** | 11,620 | 169%, 97 ms/s |
+| maximum | 1,086,204 | 58 s | 87 → 68 → 85 | 3 / 83 / 97 / **104** | 18,889 | 330%, 373 ms/s |
+
+- **No growth over the run and no growth with the rate, up to 1.09 M events/s:** no window took more than 104 ms.
+  The lag is at most 0.02 s of input. The 100–104 ms ceiling is close to Flink's default buffer timeout of 100 ms, which is
+  a likely cause of it (a 5 ms timeout did not help in §6).
+- **Advisories, `fired → received`:** p50 / p95 / p99 / max 5 / 84 / 100 / 102 ms (100×, 868), 13 / 107 / 122 / 124 (300×, 868)
+  and 18 / 94 / 117 / 139 (maximum, 885). All of them are the initial BUYs of symbols first seen after the first close.
+  Window percentiles have 309,000 samples, so they are the more reliable figure.
+- **At maximum speed the producer sets the rate**, so `keeps up` there is no capacity limit of the job (the writer is
+  busy 37% of the time, against 78–89% from a stored backlog).
+- The runs are 58–306 s long and the slice has no quiet hours, unlike the live week.
+
+### Live week: flat in the trading hours, tails at the start and at night
+
+`scripts/run-live.sh`, every symbol subscribed, 1.1 M events/s for 254 s (`bench/results/stability/20261124T113558-live-all/`,
+with a plot). Digest, `compare.py` and all 11,349 deliveries were correct.
+
+| | Windows p50 / p95 / p99 / max (ms) | Advisories p50 / p95 / p99 / max (ms) |
+|---|---|---|
+| All windows | 3 / 503 / 1,034 / 2,338 | 39 / 2,016 / 2,158 / 2,338 (n 11,337) |
+| Trading session 09:00–17:30: 8 Nov (start of the run) | 3 / 99 / 1,518 / 2,338 | 1,786 / 2,155 / 2,335 / 2,338 (n 3,084) |
+| 9 Nov | 2 / 79 / 95 / 110 | 2 / 58 / 98 / 100 (n 133) |
+| 10 Nov | 2 / 84 / 98 / 368 | 2 / 81 / 97 / 162 (n 1,413) |
+| 11 Nov | 3 / 93 / 310 / 575 | 2 / 144 / 404 / 574 (n 2,074) |
+| 12 Nov | 2 / 89 / 99 / 628 | 2 / 91 / 181 / 628 (n 2,268) |
+
+- **Between the spikes, p50 is 2–3 ms and every bin's max about 100 ms**, for all 5 days. There is no drift over the week.
+- **Two kinds of spike, both from replaying at maximum speed:** the first 10 s (a job just started, with the quiet
+  hours of 8 Nov before 09:00 and 2,412 initial BUYs in the 09:05 close), and five times about 50 s apart, when the evening, night and
+  early morning pass in an instant and their window closes pile up. They spill into the first session windows.
+  Likely cause: many closes at once (the CPU load and the JIT are not separated). In real time the night takes hours.
+- **So the live tail of §7–§9 comes mostly from the first seconds:** 3,084 of the 8,972 session advisories are from 8 Nov
+  and they set the p95 and p99 of the total. The figure for a steady load is the one of the paced session above.
+- **Runs differ.** The last live run of §9 (default subscriptions; read from the table before it was emptied, not stored) had session p99
+  1,422 / 293 / 749 / 800 / 98 ms for 8–12 Nov and max up to 1,336 ms after the first day, so the night's spill can reach
+  further into the morning than in the run above. One recorded run is a small sample.
+
+## 11. Subscribers: 1 to 1,000 traders (2026-11-24)
+
+[`bench/subscriber_sweep.py`](bench/subscriber_sweep.py): 10 Nov 09:00–12:00 at 30× (6 min per point, 63,872 events/s), 4x1, D = 1 s,
+one run per point. Deliveries were exactly as subscribed in every point, and the lag was 0 in all five.
+
+| Mode, traders | Deliveries | Steady messages (closes) | Steady fired → received p50 / p95 / p99 / max (ms) | First close (cold) p50 / max (ms) | Max messages/s |
+|---|---:|---:|---|---|---:|
+| every symbol, 1 | 4,074 | 657 (34) | 13 / 95 / 101 / 101 | 231 / 402 | 3,417 |
+| every symbol, 10 | 40,740 | 6,570 (34) | 16 / 98 / 101 / 102 | 860 / 1,379 | 20,566 |
+| every symbol, 100 | 407,400 | 65,700 (34) | 68 / 287 / 318 / 327 | 4,687 / 6,286 | 112,768 |
+| 50 symbols each, 100 | 4,979 | 621 (5) | 11 / 21 / 22 / 68 | 268 / 365 | 4,358 |
+| 50 symbols each, 1,000 | 49,735 | 6,184 (15) | 59 / 79 / 83 / 100 | 1,058 / 1,651 | 24,063 |
+
+- **Window `fired → EMA result` does not change** with the subscribers (p50 2–3, p95 97–99, p99 99–101, max 101–107 ms, 105,519
+  windows). What grows is the fan-out, to 100 copies of every advisory.
+- **The cost is in the bursts.** At 100 traders, p50 rises 5× (13 → 68 ms) and p99 3× (101 → 318 ms); the largest stage is
+  `stored → received` (p95 184 ms), with one consumer reading the whole topic. In the first close both sides queue:
+  `fired → emitted` up to 4.0 s (the EMA task sends the copies), `stored → received` up to 2.4 s. The peak rate was about
+  113,000 messages/s at 100 and at 1,000 traders, so a ceiling is likely. Which side sets it is not tested (one consumer only).
+- **The first close** (a fresh job, every symbol's initial BUY at once) sends 3,417 messages per trader: 6.3 s at 100
+  traders. It is reported apart, as before.
+- **Stress point (lag up to 18,713 records):** 1,000 traders, every symbol, 10 Nov 09:00–17:30 at 100× (`...-all-1000`): 4,285,000 deliveries, all correct, but the
+  first close took up to 44.6 s and closes are 3 s apart, so its steady percentiles (p50 13.6 s) measure its spill, not the load.
+- **Spill:** the same at 100 traders, 100× (`...-all`): p99 4.5 s. The script now marks such points `spill!`; the 100× and the
+  session results are kept but marked. In real time the closes are 5 min apart.
+- **Limits:** steady messages are copies of 657 advisories (from one day with fresh EMAs, so all initial BUYs; real crossovers need days
+  of warm state), and the copies of one advisory are sent together: they are not independent samples. With 50 symbols per
+  trader the 621 messages come from 5 closes. One run per point.
+
+## 12. The database (2026-11-24): no limit for realistic traffic, limit at about 50,000 rows/s
+
+One TimescaleDB on the same host. Its load is the rows of `ema_window`: **one per symbol with a price event and 5-min window**,
+not the events. The real feed has 4,970 such symbols, and about 3,100–3,700 rows per close.
+
+### Multi-row upserts: `reWriteBatchedInserts=true` is the new default
+
+The PostgreSQL driver then sends each JDBC batch as multi-row `INSERT … ON CONFLICT` statements. Full week from the stored backlog, 4x1, the two
+settings alternating, three runs each:
+
+| | without | **with** |
+|---|---|---|
+| Time (s) | 126.7 / 127.2 / 121.1 | **82.9 / 81.7 / 83.6** |
+| Records/s (M) | 2.28 / 2.27 / 2.39 | 3.49 / 3.54 / 3.46 |
+| Writer busy (ms/s) | 909 / 884 / 923 | 434 / 450 / 442 |
+| EMA backpressured (ms/s) | 694 / 674 / 729 | 137 / 141 / 176 |
+| CPU TimescaleDB / TaskManagers (%) | 278, 275, 278 / 520, 525, 554 | 101, 102, 101 / 751, 742, 743 |
+| Advisory fired → received p50 (ms) | 763 / 533 / 597 | 76 / 27 / 72 |
+| p95 (ms) | 1,514 / 1,334 / 1,386 | 271 / 215 / 440 |
+| max (ms) | 1,813 / 1,433 / 1,513 | 887 / 429 / 461 |
+
+- **All six runs have the reference digest.** A multi-row upsert fails if one statement has the same key twice, so failover was tested: one
+  TaskManager killed mid-run, 2 runs, both with the reference digest, 134,893 and 132,327 rows written more than once, and no such error.
+- **All measurements before this section (§1–§11) used the old setting.** Their backlog times, busy times and latencies at
+  saturation do not describe the current default. The correctness results do not depend on it.
+
+### Realistic traffic: the database does almost nothing
+
+[`bench/db_limit.py`](bench/db_limit.py) `realistic`: the real mix, 4x1, 10 Nov. 15:15–15:45 contains the week's busiest minute (15:30,
+4,593 events/s); the session is 09:00–17:30. One run per point, first close left out, CPU in % of one core
+(`bench/results/db_limit/20261124T150104-realistic/`):
+
+| Point | Events/s | Rows per close | Rows/s | Writer busy | EMA back-pressured | DB CPU avg / max | fired → EMA p50 / p99 / max (ms) | fired → written p50 / p99 / max (ms) | Close stored p50 / max (ms) |
+|---|---:|---:|---:|---:|---:|---|---|---|---|
+| **1×, real time** | 2,477 | 3,089 | 9 | **0.0%** | 0.0% | 2 / 4 | 3 / 99 / 99 | 406 / 1,179 / 1,182 | 629 / **1,187** |
+| 10× | 24,767 | 3,089 | 86 | 0.0% | 0.0% | 3 / 4 | 3 / 100 / 101 | 508 / 596 / 597 | 533 / 597 |
+| session 100× | 205,065 | 3,084 | 1,021 | 0.0% | 0.0% | 6 / 9 | 2 / 100 / 101 | 577 / 1,089 / 1,216 | 831 / 1,232 |
+| session 300× | 615,196 | 3,084 | 3,064 | 1.2% | 0.0% | 14 / 22 | 1 / 99 / 101 | 542 / 1,077 / 1,206 | 745 / 1,243 |
+| session maximum | 1,152,857 | 3,084 | 5,742 | 7.1% | 0.0% | 28 / 43 | 2 / 95 / 101 | 406 / 889 / 1,533 | 567 / 1,545 |
+
+- **At real-time pace every close is stored within 1.2 s**, of the 300 s until the next one, and the EMA task never waits. That holds up to
+  1.15 M events/s, the producer's maximum: backpressure 0.0%, and `fired → EMA result` does not change.
+- **The 0.4–1 s of `fired → written` is the flush timer, not the database.** The sink flushes at 1,000 rows or after 1 s, and 3,100 rows
+  over 4 writers leave every batch below 1,000. Advisories do not wait for it: they go to Kafka on their own branch.
+- The 1× and 10× points have only 5 closes each; the session points 100.
+
+### Where it becomes the limit, 1: many symbols closing at once
+
+`bursts`: 10 Nov 09:00–09:30 at 10× (20,761 events/s in every point), with N equally frequent symbols, so that a close has about N
+rows (`...T141703-bursts/`):
+
+| Symbols | Rows per close | Writer busy | EMA backpressured | DB CPU avg / max (%) | fired → EMA p50 / p99 / max (ms) | fired → written p50 / p99 (ms) | Close stored p50 / max (ms) |
+|---|---:|---:|---:|---|---|---|---|
+| real feed | 3,136 | 0.0% | 0.0% | 3 / 5 | 3 / 52 / 52 | 927 / 1,056 | 1,040 / 1,111 |
+| 5,000 | 5,000 | 0.2% | 0.0% | 3 / 6 | 2 / 61 / 99 | 12 / 1,054 | 925 / 1,059 |
+| 10,000 | 10,000 | 0.5% | 0.0% | 3 / 9 | 2 / 71 / 92 | 49 / 1,207 | 573 / 1,223 |
+| **20,000** | 20,000 | 1.3% | 0.8% | 4 / 19 | 5 / **507** / 696 | 100 / 1,694 | 828 / 1,734 |
+| 40,000 | 40,000 | 2.2% | 1.6% | 6 / 26 | **115** / 625 / 671 | 227 / 1,264 | 1,351 / 1,788 |
+| 80,000 | 79,757 | 3.0% | 2.6% | 10 / 44 | 224 / 765 / 815 | 311 / 904 | 1,586 / 1,653 |
+
+- **Up to 10,000 rows per close nothing waits** (3× the real feed, 2× all of its symbols). **Between 10,000 and 20,000 the EMA results begin to
+  wait**, up to 0.8 s at 80,000.
+- **80,000 rows are stored in 1.6 s: about 50,000 rows/s.** Storing a close takes longer than 5 min only at about 15 million symbols
+  (extrapolated linearly, far outside what was measured).
+- The EMA backpressure of 0.8–2.6% of a 30 s close interval is 0.2–0.8 s per close, about what is added to `fired → EMA`. That the database
+  causes it is inferred: a burst without the database cannot be timed, since the times come from `ema_window`.
+
+### Where it becomes the limit, 2: sustained rows/s
+
+`saturation`: a stored backlog read at full speed, with the database and with the rows discarded instead (`EMA_SINK=discard`, everything else
+the same). Where the run without it is much faster, the database is the limit (`...T144457-saturation/`). *Demand* = rows/s the job
+would produce at the speed without the database:
+
+| Workload | Events per row | Demand (rows/s) | Records/s without database | **with database** | Change | Writer busy | EMA back-pressured | Rows/s stored | DB CPU (%) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Real week (2 runs each) | 156 | 23,000 | 3.75 M, 3.47 M | **3.23 M, 3.40 M** | −8% | 36%, 41% | 14%, 17% | 21,676, 22,642 | 97, 110 |
+| 10,000 equal symbols, 8 Nov | 36.7 | 50,000 | 1.83 M | **1.43 M** | −22% | 62% | 48% | 33,987 | 141 |
+| 40,000 equal symbols, 8 Nov | 10.8 | 151,000 | 1.63 M | **0.63 M** | **−61%** | 81% | **71%** | **52,856** | 229 |
+
+- **Capacity: about 50,000 rows/s** on this host with 4 writers (52,856 sustained; 50,000 in the bursts). It is a lower bound, as
+  the time includes the job's start and the final idleness timeout. Before the rewrite it was about 15,000 rows/s at 88–92% busy.
+- **The database limits the throughput when the rows per second the job would produce come near 50,000.** The slowdown begins between
+  23,000 and 50,000 rows/s of demand and is severe at 151,000. The limit in events/s therefore depends on the mix:
+  **capacity × events per row**: about 0.57 M events/s at 10.8 events per row (40,000 equal symbols; measured 0.63 M while reading, 0.57 M to the last row),
+  1.9 M at 36.7 (10,000 symbols; the job alone reads 1.83 M, so demand is just below capacity, and closes arriving in bursts already cost 22%), and about 8 M for the real mix (156 events per row).
+- **The real mix did not reach it.** About 8 M events/s is extrapolated and above the 3.5–3.7 M events/s the job reads without a
+  database. The −8% is close to the differences between equal runs (3.47 and 3.75 M) and to the 5 s resolution, so it is not established.
+  The 8 M are about 1,700 times the real peak of 4,593 events/s.
+- **Margin for real traffic:** 3,700 rows per 300 s is 12 rows/s on average, 1/4,000 of the capacity.
+- **What the limit is:** four synchronous JDBC connections. At 40,000 symbols the writer is 81% busy, but the database uses 2.3 of 16 threads
+  and the TaskManagers 3.6, so it is not shown that the database server itself is exhausted. More writers (parallelism) may raise
+  the capacity; not tested.
+- **Limits:** one host, one run per point (two for the week), 5 s resolution of `records/s`. Equal symbols are not market data, and
+  were not checked against a reference. `written_at` is the start of the insert transaction, so a row is visible up to one batch later.
+  The effect on parallelism 8 (§5) was not measured again.
 
 ## Caveats
 

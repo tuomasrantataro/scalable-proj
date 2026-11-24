@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
 """Subscriber sweep: the same input with 1 to 1,000 subscribed traders (FR-4, NFR-6).
 
-Every point replays the same slice (bench/workload.py; default 8 Nov 09:00-09:30 at 10x) into a fresh job with a
+Every point replays the same slice (bench/workload.py; default 10 Nov 09:00-12:00 at 30x) into a fresh job with a
 generated subscription file, and records the deliveries, advisory latency per stage, consumer lag, busy and
 backpressured time, CPU and memory (bench/measure.py).
 
-  --mode sample (default)  each trader follows --symbols symbols, drawn in proportion to their price events, so
+  --mode all (default)     each trader follows every symbol (worst case: every advisory goes to every trader). The
+                           first window close alone sends about 3,400 messages per trader, 3.4 M with 1,000.
+  --mode sample            each trader follows --symbols symbols, drawn in proportion to their price events, so
                            popular symbols have many followers
-  --mode all               each trader follows every symbol (worst case: every advisory goes to every trader). The
-                           first window close alone sends about 3,650 messages per trader, 3.7 M with 1,000.
+
+Latency percentiles are over the messages after the first close ("steady"), so their number decides what they are worth.
+The default slice has 657 steady advisories in 34 closes; the old default (8 Nov 09:00-09:30 at 10x) had 245 in 4. In mode
+all there are that many per trader. In mode sample a trader has only a few (about 6 of 50 symbols), so use it with at least 100
+traders. A warning marks points with fewer than MIN_STEADY messages. They are not independent: all copies of one
+advisory are sent together, and all steady advisories are initial BUYs (a fresh job has no warm EMAs yet, real
+crossovers come only after days).
+
+Spill: the first close sends thousands of messages per trader at once. If delivering them takes longer than the time
+between closes (5 min / speed-up), the next closes wait behind it and the steady percentiles measure the burst, not the
+load. A point where the first close took longer than that is marked "spill!" (and a warning printed): replay it
+slower. In real time there are 5 min between closes.
 
 Deliveries are checked: the messages a consumer received, repeats counted once, must be exactly the advisories in
 `ema_window` times the traders subscribed to their symbols.
@@ -19,10 +31,10 @@ limit, not the pipeline: compare with fired → emitted and emitted → stored.
 Results: bench/results/subscriber_sweep/<time>/ results.jsonl and summary.md, updated after every point. The
 subscription files go to config/generated/ (mounted into the job, not in git).
 
-Usage (repo root; data files in --data-dir; about 6 min per point at the defaults):
-  python3 bench/subscriber_sweep.py                              # 1,10,100,1000 traders, 50 symbols each
-  python3 bench/subscriber_sweep.py --traders 1,10,100 --mode all
-  python3 bench/subscriber_sweep.py --speed 100 --symbols 200 --name fast
+Usage (repo root; data files in --data-dir; about 7 min per point at the defaults):
+  python3 bench/subscriber_sweep.py                              # 1,10,100 traders, every symbol
+  python3 bench/subscriber_sweep.py --mode sample --traders 100,1000        # 50 symbols each
+  python3 bench/subscriber_sweep.py --speed 300 --name fast
 """
 import argparse
 import sys
@@ -35,6 +47,7 @@ from backlog import ROOT, log, sql
 from measure import busiest, markdown, number, stage_cell
 
 GENERATED = ROOT / "config" / "generated"
+MIN_STEADY = 100        # fewer messages after the first close: the percentiles mean little
 
 
 def write_subscriptions(n, mode, price_rows, per_trader, seed):
@@ -77,10 +90,18 @@ def run_point(a, meta, n):
         f"fired → received p50 / p99 / max {stage_cell(point['advisories'])} ms")
     if got != expected:
         log("   WARNING: deliveries differ from the subscriptions")
+    steady = point["advisories"].get("steady", {}).get("messages") or 0
+    if steady < MIN_STEADY:
+        log(f"   WARNING: only {steady} messages after the first close, so the percentiles mean little")
+    cold_ms = point["advisories"].get("cold", {}).get("ms", {}).get("fired_to_received", {}).get("max") or 0
+    spill = point["speed"] > 0 and cold_ms > 300_000 / point["speed"]
+    if spill:
+        log(f"   WARNING: the first close took {cold_ms / 1000:.1f} s to deliver, closes are {300 / point['speed']:.1f} s "
+            "apart: the steady percentiles include its spill")
     return {**point, "traders": n, "mode": a.mode, "symbols_per_trader": a.symbols if a.mode == "sample" else None,
             "subscriptions": sum(map(len, subs.values())), "advisory_count": sum(advisories.values()),
             "deliveries_expected": expected, "deliveries_ok": got == expected,
-            "verdict": measure.verdict(point, a.max_lag_s)}
+            "verdict": measure.verdict(point, a.max_lag_s), "spill": spill}
 
 
 def summarize(results):
@@ -94,32 +115,37 @@ def summarize(results):
     rows = []
     for r in results:
         if "error" in r:
-            rows.append([r["name"], "failed"] + [None] * 10)
+            rows.append([r["name"], "failed"] + [None] * 13)
             continue
-        adv = r["advisories"]
+        adv, steady = r["advisories"], r["advisories"].get("steady", {})
         rows.append([
             r["traders"], number(r["subscriptions"]), number(r["advisory_count"]),
             f"{adv['distinct']:,}" + ("" if r["deliveries_ok"] else f" (expected {r['deliveries_expected']:,})"),
+            f"{steady.get('messages', 0):,} ({steady.get('closes', 0)})" + (" few!" if steady.get("messages", 0) < MIN_STEADY else "")
+            + (" spill!" if r.get("spill") else ""),
             number(adv.get("max_per_s")), stage_cell(adv), stage_cell(adv, stage="fired_to_emitted"),
             stage_cell(adv, stage="emitted_to_stored"), stage_cell(adv, stage="stored_to_received"),
             stage_cell(adv, part="cold"), busiest(r),
-            " / ".join(number(r["cpu_pct"].get(k)) or "–" for k in ("taskmanager", "kafka", "advisory-latency"))])
-    return text + markdown(["Traders", "Subscriptions", "Advisories", "Deliveries", "Max/s", "Total latency",
+            " / ".join(number(r["cpu_pct"].get(k)) or "–" for k in ("taskmanager", "kafka", "advisory-latency")),
+            f"{number(r['lag']['max']) or '–'} / {number(r['lag']['end']) or '–'}",
+            " → ".join(f"{s[3]:,}" for s in r.get("stability", {}).get("segments", [])) or "–"])
+    return text + markdown(["Traders", "Subscriptions", "Advisories", "Deliveries", "Steady messages (closes)", "Max/s", "Total latency",
                             "fired → emitted", "emitted → stored", "stored → received", "First close (cold)",
-                            "Busiest task busy/bp (ms/s)", "CPU % TaskManagers / Kafka / consumer"], rows)
+                            "Busiest task busy/bp (ms/s)", "CPU % TaskManagers / Kafka / consumer", "Lag max / end (records)",
+                            "Window p95 per third"], rows)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--traders", default="1,10,100,1000")
-    ap.add_argument("--mode", choices=("sample", "all"), default="sample")
+    ap.add_argument("--traders", default="1,10,100")
+    ap.add_argument("--mode", choices=("sample", "all"), default="all")
     ap.add_argument("--symbols", type=int, default=50, help="symbols per trader (mode sample)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--data-dir", default="./data")
-    ap.add_argument("--day", default="08", help="day of Nov 2021")
+    ap.add_argument("--day", default="10", help="day of Nov 2021")
     ap.add_argument("--start", default="09:00", help="slice start, feed time HH:MM")
-    ap.add_argument("--end", default="09:30", help="slice end (exclusive), HH:MM")
-    ap.add_argument("--speed", type=float, default=10, help="replay speed-up; 0 = producer maximum")
+    ap.add_argument("--end", default="12:00", help="slice end (exclusive), HH:MM")
+    ap.add_argument("--speed", type=float, default=30, help="replay speed-up; 0 = producer maximum")
     ap.add_argument("--taskmanagers", type=int, default=4)
     ap.add_argument("--parallelism", type=int, default=4)
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",

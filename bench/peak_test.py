@@ -65,7 +65,7 @@ def summarize(results):
     rows = []
     for r in results:
         if "error" in r:
-            rows.append([r["name"], "failed"] + [None] * 9)
+            rows.append([r["name"], "failed"] + [None] * 10)
             continue
         peaks[r["scope"]] = r["peak"]
         seconds = lambda v: "–" if v is None or not r["events_per_s"] else f"{v / r['events_per_s']:.1f}"
@@ -76,7 +76,8 @@ def summarize(results):
             f"{seconds(r['lag']['max'])} / {seconds(r['lag']['end'])} ({r['lag']['samples']})", busiest(r),
             " / ".join(number(r["cpu_pct"].get(k)) or "–" for k in ("taskmanager", "timescaledb", "kafka", "replay-producer")),
             " / ".join(number(w.get(k)) or "–" for k in ("p50", "p99", "max")), stage_cell(r["advisories"]),
-            f"{number(r['advisories'].get('steady', {}).get('messages')) or '–'} ({r['initial_advisories']:,})"])
+            f"{number(r['advisories'].get('steady', {}).get('messages')) or '–'} ({r['initial_advisories']:,})",
+            " → ".join(f"{s[3]:,}" for s in r.get("stability", {}).get("segments", [])) or "–"])
     text = "# Peak test\n\n" + markdown(
         ["Scope", "Busiest minute", "Rows in it", "Real peak (events/s)"],
         [[p["scope"], f"{p['day']} Nov {p['minute']}", number(p["rows"]), number(p["rows"] / 60)] for p in peaks.values()])
@@ -84,7 +85,8 @@ def summarize(results):
         markdown(["Scope", "Speed", "Events/s (achieved)", "Peak minute / second (nominal/s)", "Verdict",
                   "Lag max / end (s; samples)", "Busiest task busy/bp (ms/s)",
                   "CPU % TaskManagers / TimescaleDB / Kafka / producer", "Window fired → EMA p50 / p99 / max",
-                  "Advisory fired → received p50 / p99 / max", "Advisories (initial)"], rows)
+                  "Advisory fired → received p50 / p99 / max", "Advisories (initial)",
+                  "Window p95 per third of the run"], rows)
 
 
 def main():

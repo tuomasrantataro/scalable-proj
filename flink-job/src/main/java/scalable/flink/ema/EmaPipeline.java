@@ -4,6 +4,7 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.jdbc.JdbcConnectionOptions;
 import org.apache.flink.connector.jdbc.JdbcExecutionOptions;
@@ -14,6 +15,7 @@ import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.util.OutputTag;
 import org.slf4j.Logger;
@@ -58,6 +60,7 @@ import static scalable.flink.TradingJob.withIdlenessAndAlignment;
  *
  * Settings (env): OUT_OF_ORDERNESS_S (1, may be fractional), IDLENESS_S (10, 0 = off), WATERMARK_ALIGNMENT_S (300, 0 = off),
  * SKEW_REPORT_S (3600),
+ * EMA_SINK (jdbc; discard = do not write ema_window, to measure what the database costs),
  * PRICE_JUMP_REPORT (0.10), JDBC_URL / JDBC_USER / JDBC_PASSWORD, JDBC_BATCH_SIZE (1000),
  * KAFKA_BOOTSTRAP, KAFKA_ADVISORIES_TOPIC (advisories), SUBSCRIPTIONS_FILE.
  */
@@ -130,7 +133,11 @@ public final class EmaPipeline {
         // Own task (not chained to the EMA function): the JDBC sink upserts synchronously in batches, and chained it
         // blocked the EMA thread, so closed windows queued behind each batch. Unchained, window close → advisory
         // received stayed under ~100 ms at every input rate; chained, p95 reached 628 ms (MEASUREMENTS.md §6).
-        emas.sinkTo(jdbcSink(UPSERT_EMA, (ps, r) -> {
+        boolean writes = writesEma(envOr("EMA_SINK", "jdbc"));
+        if (!writes) {
+            LOG.warn("EMA_SINK=discard: ema_window is not written");
+        }
+        Sink<EmaWindow> emaSink = writes ? jdbcSink(UPSERT_EMA, (ps, r) -> {
             ps.setString(1, r.symbol);
             ps.setString(2, r.secType);
             ps.setObject(3, ts(r.windowStart));
@@ -150,7 +157,8 @@ public final class EmaPipeline {
             ps.setBoolean(13, r.initial);
             ps.setObject(14, ts(r.firedAt));
             ps.setObject(15, ts(r.emittedAt));
-        })).name("timescaledb-ema").disableChaining();
+        }) : new DiscardingSink<>();
+        emas.sinkTo(emaSink).name(writes ? "timescaledb-ema" : "discard-ema").disableChaining();
 
         // Query 2 output (FR-15, FR-16): each advisory is sent as soon as its window is evaluated (linger.ms=0).
         // Key = symbol, so all advisories of a symbol go to one partition, in window order.
@@ -189,7 +197,7 @@ public final class EmaPipeline {
                         .withMaxRetries(3)
                         .build())
                 .buildAtLeastOnce(new JdbcConnectionOptions.JdbcConnectionOptionsBuilder()
-                        .withUrl(envOr("JDBC_URL", "jdbc:postgresql://timescaledb:5432/trading"))
+                        .withUrl(envOr("JDBC_URL", "jdbc:postgresql://timescaledb:5432/trading?reWriteBatchedInserts=true"))
                         .withDriverName("org.postgresql.Driver")
                         .withUsername(envOr("JDBC_USER", "postgres"))
                         .withPassword(envOr("JDBC_PASSWORD", "postgres"))
@@ -199,6 +207,15 @@ public final class EmaPipeline {
     /** Seconds, possibly fractional ("0.5"), rounded to milliseconds. */
     static Duration seconds(String s) {
         return Duration.ofMillis(Math.round(Double.parseDouble(s) * 1000));
+    }
+
+    /** Whether the EMA results go to TimescaleDB. Anything but the two known values is an error. */
+    static boolean writesEma(String sink) {
+        return switch (sink) {
+            case "jdbc" -> true;
+            case "discard" -> false;
+            default -> throw new IllegalArgumentException("EMA_SINK=" + sink + ": expected jdbc or discard");
+        };
     }
 
     /** Epoch ms of local exchange time (read as UTC) → timestamptz with the same wall-clock value in UTC. */
