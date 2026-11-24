@@ -132,7 +132,7 @@ def main(argv=None):
     ap.add_argument("--save-export", type=Path, help="write the job's results to this file")
     ap.add_argument("--reference-digest", action="store_true", help="only print the digest of the reference")
     ap.add_argument("--show", type=int, default=10, help="differing rows to print")
-    ap.add_argument("--lateness", type=float, default=60, help="OUT_OF_ORDERNESS_S of the job (with --through)")
+    ap.add_argument("--lateness", type=float, default=1, help="OUT_OF_ORDERNESS_S of the job (with --through)")
     a = ap.parse_args(argv)
     if not a.reference.is_file():
         sys.exit(f"missing {a.reference}: run reference/ema_reference.py --exclude-zero-prices --out reference/output-nozero")

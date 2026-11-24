@@ -74,7 +74,7 @@ def test_late_events_dropped_after_window_evaluated(tmp_path):
         row("A.FR", "08-11-2021", "10:04:50.000", 5.0),   # late: dropped
         row("A.FR", "08-11-2021", "10:05:10.000", 6.0),   # its window is still open
     ])
-    w, _ = run(tmp_path)  # default lateness 60 s
+    w, _ = run(tmp_path, lateness=60)
     a = w[w.symbol == "A.FR"]
     assert a["close"].tolist() == [3.0, 6.0]
     assert a["ticks"].tolist() == [2, 1]

@@ -23,7 +23,7 @@ x-flink-env: &flink-env
   JDBC_USER: postgres
   JDBC_PASSWORD: postgres
   JDBC_BATCH_SIZE: ${JDBC_BATCH_SIZE:-1000}         # rows per upsert batch of the TimescaleDB sinks
-  OUT_OF_ORDERNESS_S: ${OUT_OF_ORDERNESS_S:-60}
+  OUT_OF_ORDERNESS_S: ${OUT_OF_ORDERNESS_S:-1}   # may be fractional (architecture §3.4)
   IDLENESS_S: ${IDLENESS_S:-10}       # 0 = no idleness
   # Pause a partition that is this far (event time) ahead of the slowest one; 0 = off (TradingJob)
   WATERMARK_ALIGNMENT_S: ${WATERMARK_ALIGNMENT_S:-300}

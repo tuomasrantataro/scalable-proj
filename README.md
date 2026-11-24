@@ -197,7 +197,7 @@ Options are set with env vars: `KAFKA_PARTITIONS` (8) and `KAFKA_RETENTION_MS` (
 when `kafka-setup` creates the topic; `REPEAT`, `RATE`, `KAFKA_COMPRESSION` (lz4), `KAFKA_LINGER_MS` (20) and
 `PRODUCER_THREADS` (8) for the producer; `DATA_DIR` (default `./docs`); `TASKMANAGERS` (4), `TASK_SLOTS` (1),
 `PARALLELISM` (4), `KAFKA_TOPIC` (`ticks`), `KAFKA_GROUP` (`flink`),
-`KAFKA_MAX_POLL_RECORDS` (5000), `CHECKPOINT_INTERVAL` (default `10 s`), `OUT_OF_ORDERNESS_S` (60), `IDLENESS_S`
+`KAFKA_MAX_POLL_RECORDS` (5000), `CHECKPOINT_INTERVAL` (default `10 s`), `OUT_OF_ORDERNESS_S` (1), `IDLENESS_S`
 (10), `JDBC_BATCH_SIZE` (1000) and `WATERMARK_ALIGNMENT_S` (300; pauses a partition that is that far ahead in event time, see
 [architecture §3.4](docs/architecture.md#34-watermarks-and-late-events-nfr-7)) for the job;
 `SKEW_REPORT_S` (3600) and `PRICE_JUMP_REPORT` (0.10) for the data quality report, and `SUBSCRIPTIONS_FILE`

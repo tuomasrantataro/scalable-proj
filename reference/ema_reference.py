@@ -14,7 +14,7 @@ Definitions (requirement IDs from docs/requirements.md):
   EMA           EMA_j = close * a_j + EMA_j(prev) * (1 - a_j), a_j = 2 / (1 + j), j in {38, 100} (FR-11),
                 previous EMA = 0 before a symbol's first window (FR-12). State persists over days (FR-13).
   late event    the input is a stream in file order (files in date order), and its event-time clock (the
-                watermark) is the highest event time seen so far minus --lateness (default 60 s). A window is
+                watermark) is the highest event time seen so far minus --lateness (default 1 s). A window is
                 evaluated when the watermark reaches its end (FR-8). An event whose window has already been
                 evaluated is late: it is dropped and counted (NFR-7). In this data set every price event is in
                 order except one block of 5,506 Paris index rows at the end of 10 Nov, which re-send the day's
@@ -38,7 +38,7 @@ Outputs (in --out, default reference/output/), timestamps are naive local exchan
 
 Usage:
   reference/.venv/bin/python reference/ema_reference.py [--data-dir data] [--out reference/output]
-                                                        [--exclude-zero-prices] [--lateness 60] [--jobs 2]
+                                                        [--exclude-zero-prices] [--lateness 1] [--jobs 2]
 """
 from __future__ import annotations
 
@@ -278,8 +278,8 @@ def main(argv=None):
     ap.add_argument("--out", type=Path, default=Path("reference/output"))
     ap.add_argument("--files", nargs="*", help="only these file names (default: every daily file)")
     ap.add_argument("--exclude-zero-prices", action="store_true", help="treat Last = 0 as not a price event")
-    ap.add_argument("--lateness", type=float, default=60.0,
-                    help="watermark delay in seconds (default 60); 'inf' keeps late events")
+    ap.add_argument("--lateness", type=float, default=1.0,
+                    help="watermark delay in seconds (default 1); 'inf' keeps late events")
     ap.add_argument("--jobs", type=int, default=2, help="files read in parallel (each needs ~6 GB of RAM)")
     args = ap.parse_args(argv)
 

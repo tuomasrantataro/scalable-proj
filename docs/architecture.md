@@ -2,8 +2,8 @@
 
 Companion to [`requirements.md`](requirements.md). Requirement IDs (FR-x, NFR-x) refer to that document.
 
-Last updated 2026-11-20, after replacing Apache Iggy with Apache Kafka. Findings:
-[`MEASUREMENTS.md`](../MEASUREMENTS.md) (Kafka), [`iggy.md`](iggy.md) (Iggy tests and why it was replaced),
+Last updated 2026-11-23, after the full-week run with corrected measurements. Findings:
+[`MEASUREMENTS.md`](../MEASUREMENTS.md) (Kafka; current results in §7), [`iggy.md`](iggy.md) (Iggy tests and why it was replaced),
 [`reference/README.md`](../reference/README.md).
 
 ## 1. Technology Decisions
@@ -51,7 +51,7 @@ Last updated 2026-11-20, after replacing Apache Iggy with Apache Kafka. Findings
 ### 2.1 Components
 | Service | Responsibility |
 |---|---|
-| `replay-producer` | Reads the daily CSV files in order and skips the `#` comment lines and the header. Drops irrelevant events early, or forwards everything (configurable, see §3.1). Sends one Kafka record per row (key = symbol ID), with the partition chosen **from the symbol ID hash**; librdkafka batches and lz4-compresses per partition. One reader thread and 8 sender threads, each partition always on the same sender (§3.1). Supports a speed-up factor (1×, 10×, …, max) and stamps an ingestion timestamp for latency measurement. *Implemented: partitioning, `RATE` (msg/s), `REPEAT`, `PRODUCER_THREADS`. Not yet implemented: event filtering, event-time replay speed-up, ingestion timestamp (the record timestamp is the send time, read once per 4096 rows).* |
+| `replay-producer` | Reads the daily CSV files in order and skips the `#` comment lines and the header. Drops irrelevant events early, or forwards everything (configurable, see §3.1). Sends one Kafka record per row (key = symbol ID), with the partition chosen **from the symbol ID hash**; librdkafka batches and lz4-compresses per partition. One reader thread and 8 sender threads, each partition always on the same sender (§3.1). Supports a speed-up factor (1×, 10×, …, max) and stamps an ingestion timestamp for latency measurement. *Implemented: partitioning, `RATE` (msg/s), `REPEAT`, `PRODUCER_THREADS`, replay at a multiple of the feed's pace (`SPEEDUP`) and of a part of a day (`START_TIME`/`END_TIME`), both by the feed's clock ([`feed.rs`](../producer-rs/src/feed.rs), §3.1), and evenly spread artificial symbols for skew comparisons (`UNIFORM_SYMBOLS`). Not yet implemented: event filtering, ingestion timestamp (the record timestamp is the send time, read once per chunk of up to 4096 rows).* |
 | `kafka-setup` | One-shot job (same image as the producer). Creates the input topic `ticks` (8 partitions) and the output topic `advisories` (4 partitions), idempotently: existing topics are kept. Auto-creation of topics is off in the broker. Consumer groups need no setup. |
 | `kafka` | One Kafka broker in KRaft mode (broker and controller in one process), `kafka:9092` for the containers and `localhost:9094` for the host. Single node: internal topics have replication factor 1. Data on the `kafka-data` volume. |
 | `flink-jobmanager` | Runs the job in **standalone application mode**. |
@@ -71,6 +71,8 @@ Last updated 2026-11-20, after replacing Apache Iggy with Apache Kafka. Findings
 3. Build the event time from `Trading date` + `Trading time`.
 4. Serialize to a compact binary format. Send to Kafka topic `ticks`, partitioned by hash of `ID.[Exchange]` (Java `String.hashCode()`, as in the earlier producers), with the symbol as record key. This preserves per-symbol order within a partition; each partition is always sent by the same producer thread, and idempotence (`enable.idempotence`) keeps the order across retries. *Currently the messages are CSV text, and binary serialization is still to do.*
 
+**The feed's clock.** A row's `Time` is not its arrival time: early in each trading day's file there are snapshot rows with a much later `Time` (8 Nov, file row 41: 09:12:16). Pacing by it made the producer wait for those rows and send everything before them as one burst. The clock is now the median `Time` of blocks of 1,000 rows, smoothed over neighbouring blocks, and never decreases. On the five trading days it never jumps more than 1.0 s between 09:00 and 17:30, and the sweep's 10× and 100× points take the time they should (179.9 s of 180, 17.99 s of 18; [`MEASUREMENTS.md`](../MEASUREMENTS.md) §7).
+
 Filtering non-price events in the producer reduces load substantially: about 59 M price events out of 289 M total. The filter can be switched to the Flink side to compare both designs.
 
 ### 3.2 Flink job topology
@@ -83,11 +85,13 @@ KafkaSource (one split per partition, spread over all source subtasks; one water
   → TumblingEventTimeWindows(5 min)  ── aggregate: last price by event time (Close), tick count
   │                                     late events → data_issue
   → KeyedProcessFunction (EMA38, EMA100, crossover detection; keyed state) ── price jumps → data_issue
-  ├─► JDBC sink → TimescaleDB (EMA per window incl. advisories, all symbols; data issues)
+  ├─► JDBC sinks → TimescaleDB (EMA per window incl. advisories, all symbols: own task; data issues)
   └─► advisories only → subscription filter: one copy per subscribed trader (§3.6)
         → Kafka sink → topic `advisories` (key symbol, JSON value; one record per trader and advisory)
 ```
-*Implemented in [`flink-job/src/main/java/scalable/flink/ema/`](../flink-job/src/main/java/scalable/flink/ema/)). Full week (289 M rows, 59.4 M usable price events) in 4 min 39 s on one laptop, with the producer running at the same time; the job kept up with the producer ([`MEASUREMENTS.md`](../MEASUREMENTS.md)).*
+*Implemented in [`flink-job/src/main/java/scalable/flink/ema/`](../flink-job/src/main/java/scalable/flink/ema/)). Full week (289 M rows, 59.4 M usable price events) in 4 min 36–39 s on one laptop, with the producer running at the same time; the job kept up with the producer. From a stored backlog: 135–145 s, about 2.1M rows/s ([`MEASUREMENTS.md`](../MEASUREMENTS.md) §7).*
+
+The `ema_window` sink runs in its own task, so that its synchronous batches do not run in the EMA task's thread. The two are still coupled: the EMA task sends to both branches, so when the writer's input buffers are full it waits, and advisories wait with it (§4.1).
 
 ### 3.3 Windowing (FR-5 to FR-8)
 - 5-minute **event-time tumbling windows**.
@@ -96,14 +100,18 @@ KafkaSource (one split per partition, spread over all source subtasks; one water
 - The window function keeps only the **last price by event time** (not by arrival order), so out-of-order events within a window are handled correctly.
 
 ### 3.4 Watermarks and late events (NFR-7)
-- Strategy: `forBoundedOutOfOrderness(D)`, with D configurable (initial value of a few seconds; to be tuned from a dataset analysis of the actual disorder).
-- **Measured disorder (reference implementation).** In file order, price events are in event-time order per symbol, with one exception: 5,506 rows at the end of 10 Nov re-send the open, day high and day low of 1,812 Paris indices with `Trading time 01:00`, 17.9 h late. Against one global watermark, 189 Xetra `Last = 0` records (`Trading time 00:00`, at the end of each day's file) are late too. Any D from 0 s to 17.9 h therefore gives identical results. A stream must drop these rows: kept, they become the close of a 01:00 window and change the EMAs of 1,812 symbols and about 1,790 advisories. D can be chosen for latency alone.
+- Strategy: `forBoundedOutOfOrderness(D)`, with D configurable (`OUT_OF_ORDERNESS_S`, default 1 s; 60 s until 24 Nov 2026).
+- **Measured disorder (reference implementation).** In file order, price events are in event-time order per symbol, with one exception: 5,506 rows at the end of 10 Nov re-send the open, day high and day low of 1,812 Paris indices with `Trading time 01:00`, 17.9 h late. Against one global watermark, 189 Xetra `Last = 0` records (`Trading time 00:00`, at the end of each day's file) are late too. Any D from 0 s to 17.9 h therefore gives identical results. A stream must drop these rows: kept, they become the close of a 01:00 window and change the EMAs of 1,812 symbols and about 1,790 advisories. D can be chosen for latency alone. *Confirmed in Flink (`MEASUREMENTS.md` §8): the full week gives the reference digest and 5,506 late events with D = 60, 5, 1, 0.5 and 0 s from a stored backlog, and with 1 and 0.5 s in live runs.*
 - `withIdleness` so that idle partitions (nights, weekend, end of the replay) do not stall the watermark. *With the Iggy connector it was required in any case: its second reader never got a split and held the watermark at `Long.MIN_VALUE` ([`iggy.md`](iggy.md)). With Kafka every reader has partitions; idleness is still needed so that the last windows fire when the input stops.*
 - **One watermark per partition.** The Kafka source tracks the watermark of each split and emits the minimum, so a partition that is ahead does not make the others late. *Measured: the full week with 8 partitions gives byte-identical `ema_window` and `data_issue` contents to the earlier 1-partition Iggy run. (The Iggy connector had one watermark per reader: with 4 partitions, 54% of the price events were late.)*
 - **Watermark alignment (`WATERMARK_ALIGNMENT_S`, 300 s).** A partition whose watermark gets more than 5 min of event time ahead of the slowest partition is paused (checked every second). Without it, results depended on read timing when the job read a stored backlog: partitions drift apart by hours of event time, the slowest holds the watermark back, and events that are late in file order get through (runs counted 600 to 1,287 fewer late events than the reference, likely among the 5,506 late index rows of 10 Nov, and wrote up to 425 extra windows). In live runs the producer paces all partitions, so they stay together. Three runs without alignment gave two different results; every aligned run gave exactly the reference results, and alignment cost no measurable time ([`MEASUREMENTS.md`](../MEASUREMENTS.md) §5). Any drift below the 17.9 h of the late rows would give the same results for this dataset.
-- Events later than D plus allowed lateness go to a **side output** and are counted. The rate of late events is reported in the evaluation. *Implemented: late events are stored in `data_issue` (reason `LATE`). Flink full week with D = 60 s: exactly the 5,506 re-sent index rows of 10 Nov were late.*
+- Events later than D plus allowed lateness go to a **side output** and are counted. The rate of late events is reported in the evaluation. *Implemented: late events are stored in `data_issue` (reason `LATE`). Flink full week with every D tested (0 to 60 s): exactly the 5,506 re-sent index rows of 10 Nov were late.*
+- **The last windows of an input need later events.** A window fires when the watermark passes its end, so when the input stops, windows ending after the last event time − D stay open (7 windows after a run of 8 Nov only with D = 1 s, 14 with 60 s). In the full week the next day's rows close them, and the weekend's zero prices close Friday's.
 - **Every event with a valid event time advances the watermark, including rejected ones** (e.g. zero prices). The weekend files contain only zero prices; without them the watermark would stop at Friday evening and Friday's last windows would never be evaluated. Events with a malformed or implausible time (more than a day from the row's `Date`) get no timestamp, so a corrupt date cannot push the watermark ahead.
-- The latency/correctness trade-off of D is a design exploration item: measure the late-event count against output latency for several values of D.
+- **Choice of D: 1 s** ([`MEASUREMENTS.md`](../MEASUREMENTS.md) §8). In real time, an advisory reached the trader 60.7 s (p50) after its window's end with D = 60 s, 5.6 s with 5 s and 1.6 s with 1 s, and the number of late events is the same for every D. So on this data a larger D only costs latency.
+  - D = 0 also gives identical results, but leaves no tolerance: an event that arrives in the wrong order across a window boundary would be lost. A feed with more disorder needs a larger D (a setting, no code change).
+  - A partition that is silent for `IDLENESS_S` (10 s) no longer holds the watermark back. Events that it then delivers can be late. With D = 60 s, part of such a stall was covered by the bound; with 1 s it is not. Not seen in any run, but a risk for a feed that stalls per partition.
+  - The delay above D was about 0.5–0.6 s at 1 s. It includes Flink's 200 ms watermark interval; the rest is not explained (the source's `fetch.min.bytes` of 64 KiB with Kafka's default 500 ms wait is a possible cause, not tested).
 
 ### 3.5 EMA state and crossover detection (FR-10 to FR-18)
 Per-symbol keyed state:
@@ -122,15 +130,15 @@ if ema38 < ema100 and prevEma38 >= prevEma100 → SELL
 - **Empty windows (decision):** if a symbol has no price event in a window, its EMAs are not updated and no crossover is evaluated. To be confirmed; see requirements §7.
 - **Zero prices (decision: excluded).** Every symbol gets a `Last = 0` reset record at `Trading time 00:00` each day (316,382 rows in the week, plus some at Xetra's 09:00 and 17:30). They are not trades, so the Flink job drops them and counts them (log line `quality … zero_price=`). Taken literally (FR-9), they would close 46,733 windows at 0; each one drags EMA38 below EMA100 and causes a SELL at 00:05 and a BUY the next morning (25,834 advisories in the week instead of 11,349). The reference can still compute the literal variant (`ema_reference.py` without `--exclude-zero-prices`).
 - **Initialization artifact:** the first positive close of a symbol always gives BUY, since both previous EMAs are 0. Such advisories are flagged `initial` (4,970 in the week, one per symbol).
-- *Implemented in `EmaState` (plain Java, unit-tested) inside `EmaFunction`. Windows of one key arrive in window order; an older or repeated window would be refused and reported (`WINDOW_OUT_OF_ORDER`, none seen). Full week: 1,855,645 windows for 4,970 symbols, 7,769 BUY (4,970 initial) and 3,580 SELL. SQL checks on the output: every row follows FR-11 from its previous row, starts at 0 (FR-12), and has an advisory exactly when FR-15/16 hold.*
+- *Implemented in `EmaState` (plain Java, unit-tested) inside `EmaFunction`. Windows of one key arrive in window order; an older or repeated window would be refused and reported (`WINDOW_OUT_OF_ORDER`, none seen). Full week: 1,855,645 windows for 4,970 symbols, 7,769 BUY (4,970 initial) and 3,580 SELL. SQL checks on the output: every row follows FR-11 from its previous row, starts at 0 (FR-12), and has an advisory exactly when FR-15/16 hold. Compared with the pandas reference ([`compare.py`](../reference/compare.py)): all windows, closes, EMAs, advisories and `initial` marks are identical bit for bit, in a backlog and in a live run.*
 - The state survives day boundaries and is included in checkpoints.
 
 ### 3.6 Subscriptions (FR-3, FR-4)
 - EMAs and advisories are computed for **all** symbols (and all are stored in `ema_window`). Only advisory delivery to the Kafka topic `advisories` is filtered.
 - **Per-trader lists in a config file (decision).** [`config/subscriptions.txt`](../config/subscriptions.txt): one line per simulated trader, `trader: SYMBOL SYMBOL, ...`, or `trader: *` for every symbol. The job reads it once at start (`SUBSCRIPTIONS_FILE`, mounted read-only into the JobManager) and ships a symbol → traders map with the job graph. Each advisory is sent once per subscribed trader, with a `trader` field; a symbol nobody subscribes to sends nothing. Malformed lines stop the job with the file and line number. Changing subscriptions = edit the file and restart the job. *Caveat: recreating the JobManager starts a new job; checkpoints are not retained and there is no HA, so the EMA state starts again from 0 while the Kafka source resumes from the last offsets committed at a checkpoint. To keep the state, stop the job with a savepoint and start the new one from it (not yet scripted).*
 - Why not a `subscriptions` topic with broadcast state (the earlier plan): the course project and the evaluation criteria ask for updates only for a subscribed subset and for "more subscribers" as a scalability dimension, but nothing asks for runtime changes. With the Iggy connector it would also have cost a busy-polling core and lost changes on redeploy ([`iggy.md`](iggy.md)); with Kafka a compacted topic read from the beginning would work, and can still be added later on top of the file.
-- *Verified on the full week with the default file (5 traders, 17 subscriptions, 14 symbols): of 11,349 advisories, 61 were for subscribed symbols and became exactly the 73 expected messages (overlapping traders), with identical fields and no duplicates.*
-- Scalability experiments: vary the number of traders and symbols per trader (generated files, `SUBSCRIPTIONS_FILE`).
+- *Verified on the full week with the default file (5 traders, 17 subscriptions, 14 symbols): of 11,349 advisories, 61 were for subscribed symbols and became exactly the 73 expected messages (overlapping traders), with identical fields and no duplicates. Repeated on 2026-11-23 for (trader, symbol, window, type) against the reference advisories: 73 of 73, none missing or unexpected, backlog and live.*
+- Scalability experiments: vary the number of traders and symbols per trader (generated files, `SUBSCRIPTIONS_FILE`), with `bench/subscriber_sweep.py`, which also checks the number of deliveries. *Not run yet.*
 
 ### 3.7 Output records
 | Record | Fields |
@@ -158,10 +166,20 @@ Thresholds: `SKEW_REPORT_S` (3600), `PRICE_JUMP_REPORT` (0.10).
 
 ### 4.1 Parallelism model
 - **Partition by symbol** in both Kafka and Flink: no cross-symbol coordination is needed, so the work is embarrassingly parallel.
-- **Source reading scales out.** The Kafka source spreads the partitions of `ticks` over all source subtasks: with 8 partitions and parallelism 4, each reader has 2. In the full-week run all 4 readers read about 250k rows/s each and were busy only ~23% of the time (with Iggy, one reader did everything and was busy 95%; [`iggy.md`](iggy.md) §5).
-- **Where the limit is now.** In a live run (producer and job together) the producer: the job kept up (consumer lag under 0.5 s). Replaying a stored backlog (`bench/backlog.py`), the job itself: the EMA function chained with the TimescaleDB writer is busy 87–95% at parallelism 1–4. The whole week takes 347 s at parallelism 1, 153 s at 4 and 136 s at 8 (2.6×); beyond 4, TimescaleDB (3.8 cores) and the shared host limit further gains ([`MEASUREMENTS.md`](../MEASUREMENTS.md) §5).
+- **Source reading scales out.** The Kafka source spreads the partitions of `ticks` over all source subtasks: with 8 partitions and parallelism 4, each reader has 2. In the live full-week run all 4 readers read about 250k rows/s each and were busy only ~24% of the time (with Iggy, one reader did everything and was busy 95%; [`iggy.md`](iggy.md) §5).
+- **Where the limit is now** (parallelism 4, [`MEASUREMENTS.md`](../MEASUREMENTS.md) §7). Live, the producer (5.4 cores): the job keeps up, with at most 8,397 records of `pendingRecords` lag (which leaves out records already fetched). From a stored backlog, **the TimescaleDB writer**: it is busy 78–89% of the time, while the EMA task is busy 2% and backpressured 56–62%, waiting for it. The job uses about 4.7–5.1 cores, TimescaleDB 2.6–2.7 and Kafka 1.1.
+- **Effect on latency.** At 22k–514k events/s advisories arrive 10–41 ms (p50, at most 105 ms) after their window fired. The saturated backlog run takes 336–617 ms (p50, at most 2.6 s), nearly all of it before the EMA result. Likely reason: the writer's full buffers block the EMA task and windows queue in front of it (inferred from the busy and backpressured times, not tested). The feed's real peak on 8 Nov is about 4,100 events/s. A possible fix for the saturated case: write the EMA results to Kafka and fill TimescaleDB from there.
+- **Scaling with resources.** Measured once per configuration before the sink got its own task: 347 s at parallelism 1, 153 s at 4, 136 s at 8 (2.6×), limited beyond 4 by TimescaleDB and the shared host (§5 there). To be repeated with `bench/scaling_matrix.py`. Skew of the keyed work alone does not explain the flattening: the real hash assignment would allow about 7× at parallelism 8.
 - The partition count of `ticks` (8) is the upper bound on source parallelism. Set it at least as high as the largest number of slots to test; it cannot be lowered later without recreating the topic. Operators after `keyBy(symbol)` can use more parallelism than the source.
-- Long-tail skew: hot symbols are spread across partitions and subtasks by hashing. Flink's key groups (max parallelism, e.g. 128) give fine-grained rebalancing when rescaling. A single symbol cannot be split, but the per-symbol rate is well within one core's capacity.
+- **Long-tail skew.** Hot symbols are spread across partitions and subtasks by hashing; Flink's 128 key groups give fine-grained rebalancing when rescaling. The skew shrinks along the pipeline, because only price events are keyed and windows count each symbol once per 5 min (`bench/symbol_distribution.py`, whole week):
+
+  | | All rows (producer, Kafka, source) | Price events (window operator) | Windows (EMA, database) |
+  |---|---|---|---|
+  | Share of the top 1% of the symbols | 47.3% | 13.5% | 2.2% |
+  | Gini coefficient | 0.86 | 0.68 | 0.41 |
+  | Most loaded / average, 8 partitions; 4 subtasks (measured) | 1.33 (partitions), 1.05 (readers) | 1.10 | 1.03 |
+
+  The measured balance of the partitions, price events and windows equals the one predicted from the hashes. The least even stage is reading Kafka, and more partitions make it worse (1.49 at 16, 2.02 at 32). A single symbol cannot be split, but the hottest reaches only 22 price events/s.
 
 ### 4.2 Scaling in Docker Compose
 Docker Compose has no built-in autoscaling. The plan in increasing ambition:
@@ -184,14 +202,14 @@ Limits: scaling is bounded by a single host's resources. The Kafka setup is a si
 
 | Aspect | Method |
 |---|---|
-| Correctness | Run the pandas reference implementation on the same data. Compare EMA values (with a tolerance) and the exact set of advisories per symbol. |
-| Throughput | Load the week into Kafka once, then replay the stored backlog into the job (`bench/backlog.py`), so the producer is not part of the measurement: full-week time, read rate, busy time per task. Live runs (producer at max rate) with the Kafka consumer lag show whether the job keeps up. |
-| Latency | From the end of a window to a trader's system receiving the advisory (`bench/advisory_latency.py`, run by `bench/backlog.py run` and `scripts/run-live.sh`): `fired_at` (wall clock when the window fired, i.e. the watermark passed its end) → `emitted_at` (EMA function) → Kafka append time (topic `advisories` uses `LogAppendTime`) → receive time in a consumer (`advisory-latency` service). p50, p95, p99, max per stage. Not yet covered: the time from an event's ingestion to the window firing (needs the planned ingestion timestamp, §3.7). Load/latency curve: `bench/latency_sweep.py`; results and the experiments that moved the `ema_window` sink into its own task: [`MEASUREMENTS.md`](../MEASUREMENTS.md) §6. |
-| Scalability | Vary the TaskManager count (1, 2, 4, …) and the Kafka partition count. Vary the input: one exchange vs. all three, and replay speed-up. |
-| Resource use | CPU and memory per container (cAdvisor), Flink busy time and backpressure. |
-| Long tail | Per-subtask record counts and busy time, to show the load balance under skew. |
+| Correctness | `reference/compare.py`: table `ema_window` against the pandas reference, bit for bit (windows, ticks, close, EMAs, advisories). Every benchmark run also prints a digest of its results; the reference's is `19413a50…`, so each run with it is verified. |
+| Throughput | Load the week into Kafka once, then replay the stored backlog into the job (`bench/backlog.py`), so the producer is not part of the measurement: full-week time, read rate, busy time per task. Live runs (producer at max rate) with the Kafka consumer lag (`pendingRecords`; the Kafka client's `records_lag_max` stays at old values) show whether the job keeps up. |
+| Latency | From the end of a window to a trader's system receiving the advisory (`bench/advisory_latency.py`, run by `bench/backlog.py run` and `scripts/run-live.sh`): `fired_at` (wall clock when the window fired, i.e. the watermark passed its end) → `emitted_at` (EMA function) → Kafka append time (topic `advisories` uses `LogAppendTime`) → receive time in a consumer (`advisory-latency` service). p50, p95, p99, max per stage. Not yet covered: the time from an event's ingestion to the window firing (needs the planned ingestion timestamp, §3.7). Load/latency curve: `bench/latency_sweep.py`. A saturated backlog run measures queueing, so latency is reported from the sweep. Results: [`MEASUREMENTS.md`](../MEASUREMENTS.md) §7; the experiments that moved the `ema_window` sink into its own task: §6 there. |
+| Scalability | Vary the TaskManager count (1, 2, 4, …) and the Kafka partition count. Scripts: `bench/scaling_matrix.py` (resources, repeated runs), `bench/peak_test.py` (busiest minute overall and per exchange, at several speed-ups), `bench/subscriber_sweep.py` (1 to 1,000 traders). *Written, not run yet.* |
+| Resource use | CPU and memory per service (cAdvisor), TaskManager heap, Flink busy and backpressured time from the accumulated counters (the per-second gauges are moving averages and start at 1000). |
+| Long tail | `bench/symbol_distribution.py` (offline: concentration, balance over partitions and subtasks); each benchmark run records rows per partition, records and busy time per subtask (max/mean). Comparison with evenly spread symbols: `--workload uniform`, *not run yet*. |
 
-All of these metrics are visible in Grafana dashboards, except advisory latency (printed by the benchmark scripts). Raw results are exported for the report.
+Throughput, lag, resource use and per-subtask load are also visible in Grafana dashboards; advisory latency, the digest and the comparison are only printed by the scripts. Raw results are exported for the report.
 
 ### 5.1 Grafana dashboards
 Provisioned from [`config/grafana/dashboards/`](../config/grafana/dashboards/) (JSON; edits in the UI last until Grafana restarts, so export the JSON to keep them). Market times are local exchange time stored as UTC (§3.3), so the market dashboards use the UTC time zone and default to the dataset's week.
@@ -200,9 +218,9 @@ Provisioned from [`config/grafana/dashboards/`](../config/grafana/dashboards/) (
 |---|---|---|
 | **Trading trends** (home) | FR-14 to FR-19 | Filters: exchange, equity/index, hide or show `initial` advisories, symbol. Market overview: BUY/SELL counts, advisories per hour (BUY up, SELL down, so market-wide moves stand out), the 15 symbols with most crossovers, latest advisories (click a symbol to open it). Per symbol: close, EMA38 and EMA100 with BUY/SELL markers and the EMA warm-up shaded (88 / 231 windows, as the reference plots); the spread (EMA38 − EMA100) / EMA100, where each zero crossing is an advisory; price events per window; the symbol's advisories. |
 | **Correctness and data quality** | NFR-7 to NFR-9 | Output counts; SQL checks on every stored row: FR-11 formula, start at 0 and carried state (FR-12/13), advisory if and only if a crossover (FR-15/16), window bounds (FR-5 to FR-7), no zero closes, `initial` flag. Each must be 0 (all 0 on the full week; about 5 s). Data issues by reason, per hour, the symbols with most price jumps, and the latest issues. |
-| **System metrics** | NFR-2, NFR-5, NFR-10 | Records/s at source, after the quality gate, into the EMA function and as advisories; records per subtask (load balance under skew); busy and backpressured time per task and subtask; watermark progress (replay speed); checkpoints; JVM heap; CPU and memory per container; results written per second (from `emitted_at`). Live, 10 s refresh. |
+| **System metrics** | NFR-2, NFR-5, NFR-10 | Records/s at source, after the quality gate, into the EMA function and as advisories; records per subtask (load balance under skew); busy and backpressured time per task and subtask (accumulated counters, over 30 s); watermark progress (replay speed); checkpoints; JVM heap; CPU and memory per container; results written per second (from `emitted_at`). Live, 10 s refresh. |
 
-Not covered yet: per-trader delivery (subscriptions are in a file, not in the database), the comparison with the pandas reference (offline), and end-to-end latency.
+Not covered yet: per-trader delivery (subscriptions are in a file, not in the database), the comparison with the pandas reference (offline), and advisory latency (benchmark scripts only). Latency from an event's arrival to its window firing is not measured at all.
 
 Source throughput baselines with Iggy (single reader, poll batch sizes, duplicates and gaps) are in [`iggy.md`](iggy.md) §4.
 
@@ -213,11 +231,12 @@ Source throughput baselines with Iggy (single reader, poll batch sizes, duplicat
 docker-compose.yml   kafka, kafka-setup, timescaledb, db-setup, jobmanager, taskmanager ×4, replay-producer,
                      advisory-latency,
                      grafana, prometheus, cadvisor
-MEASUREMENTS.md      measurements with Kafka (producer, full week, bottleneck, JDBC sink and failover)
+MEASUREMENTS.md      measurements with Kafka (producer, full week, bottleneck, failover, scaling, latency; current results: §7)
 producer-rs/         replay producer + kafka-setup + advisory latency consumer (Rust, rdkafka, Cargo, Dockerfile)
 flink-job/           Flink application (ema/: EMA, advisories, data quality; unit tests in src/test)
 bench/               benchmark scripts (backlog.py, scaling_matrix.py, latency_sweep.py, peak_test.py, subscriber_sweep.py,
-                     advisory_latency.py) and the data set analysis symbol_distribution.py
+                     advisory_latency.py), their helpers (workload.py, measure.py) and the data set analysis
+                     symbol_distribution.py; raw results in results/
 docs/                requirements, architecture, report; iggy.md (the earlier Iggy setup: tests, measurements,
                      why it was replaced); figures/reference/ (reference result plots)
 reference/           pandas reference implementation, comparison with the job's results (compare.py), unit tests, plots
@@ -236,6 +255,7 @@ autoscaler/          (stretch) custom scaling controller
 |---|---|
 | Message broker connector limits results or scaling | *Happened with Iggy* (one active reader, at-most-once, one watermark per reader; [`iggy.md`](iggy.md)), so the broker was replaced with Kafka on 2026-11-20. The Kafka connector has no Flink 2.3 build yet; 5.0.0-2.2 is tested on 2.3 ([`MEASUREMENTS.md`](../MEASUREMENTS.md)). |
 | Producer becomes the bottleneck | *It is now (full week):* librdkafka reads the clock per record, a ~1.4 µs system call on this laptop (HPET). Mitigated with 8 sender threads (1.41M msg/s alone). Further options: a host with a TSC clock source, or several rows per Kafka record. |
+| TimescaleDB writer limits throughput and, when saturated, delays advisories | *Measured (§4.1):* it is the bottleneck at about 2M events/s. The sweep up to 514k events/s, over 100 times the real peak, shows no such delay. Options, not tested: larger batches (`JDBC_BATCH_SIZE`), or EMA results via Kafka. |
 | Readers without data stall the event-time watermark | `withIdleness`, plus monitoring of watermark lag. *Confirmed with Iggy (no window ever fired without idleness); with Kafka every reader has partitions, but idleness is still needed when the input stops.* |
 | Single-host limits hide scaling effects | Use a larger VM for evaluation runs, and report the results relative to the host's cores. |
 | Tight schedule (deadline 27.11.2026) | Implement in order: correctness → metrics → visualization → scaling. Each step is independently demonstrable. |

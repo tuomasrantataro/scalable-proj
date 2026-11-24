@@ -56,7 +56,7 @@ import static scalable.flink.TradingJob.withIdlenessAndAlignment;
  * Advisory delivery is at-least-once: each record is sent at once (linger.ms=0), and the sink flushes at every
  * checkpoint, so after a failure some advisories can be sent again. (trader, symbol, window_end) identifies a message, so consumers can drop repeats.
  *
- * Settings (env): OUT_OF_ORDERNESS_S (60), IDLENESS_S (10, 0 = off), WATERMARK_ALIGNMENT_S (300, 0 = off),
+ * Settings (env): OUT_OF_ORDERNESS_S (1, may be fractional), IDLENESS_S (10, 0 = off), WATERMARK_ALIGNMENT_S (300, 0 = off),
  * SKEW_REPORT_S (3600),
  * PRICE_JUMP_REPORT (0.10), JDBC_URL / JDBC_USER / JDBC_PASSWORD, JDBC_BATCH_SIZE (1000),
  * KAFKA_BOOTSTRAP, KAFKA_ADVISORIES_TOPIC (advisories), SUBSCRIPTIONS_FILE.
@@ -96,7 +96,7 @@ public final class EmaPipeline {
         if (subscriptions.subscriptionCount() == 0) {
             LOG.warn("no subscriptions in {}: no advisories will be delivered", subscriptionsFile);
         }
-        long outOfOrdernessS = Long.parseLong(envOr("OUT_OF_ORDERNESS_S", "60"));
+        Duration outOfOrderness = seconds(envOr("OUT_OF_ORDERNESS_S", "1"));
         long skewS = Long.parseLong(envOr("SKEW_REPORT_S", "3600"));
         double jump = Double.parseDouble(envOr("PRICE_JUMP_REPORT", "0.10"));
 
@@ -104,7 +104,7 @@ public final class EmaPipeline {
         // zero prices arrive, and without them Friday's last windows would never be evaluated. Events with a
         // malformed or implausible time get no timestamp, so they cannot move the watermark.
         WatermarkStrategy<MarketEvent> wm = WatermarkStrategy
-                .<MarketEvent>forBoundedOutOfOrderness(Duration.ofSeconds(outOfOrdernessS))
+                .<MarketEvent>forBoundedOutOfOrderness(outOfOrderness)
                 .withTimestampAssigner((e, ts) -> e.timeValid ? e.eventTime : Long.MIN_VALUE);
         wm = withIdlenessAndAlignment(wm); // architecture §3.4
 
@@ -194,6 +194,11 @@ public final class EmaPipeline {
                         .withUsername(envOr("JDBC_USER", "postgres"))
                         .withPassword(envOr("JDBC_PASSWORD", "postgres"))
                         .build());
+    }
+
+    /** Seconds, possibly fractional ("0.5"), rounded to milliseconds. */
+    static Duration seconds(String s) {
+        return Duration.ofMillis(Math.round(Double.parseDouble(s) * 1000));
     }
 
     /** Epoch ms of local exchange time (read as UTC) → timestamptz with the same wall-clock value in UTC. */

@@ -12,7 +12,8 @@ broker's append time. All clocks are the same host clock (every container runs o
   fired → received    total, from the end of the window to the trader's system
 
 `fired_at` is when the job saw the window as ended. It is later than the window's end in market time by the
-out-of-orderness bound (OUT_OF_ORDERNESS_S) plus however long the input takes to get past that point.
+out-of-orderness bound (OUT_OF_ORDERNESS_S) plus however long the input takes to get past that point; that delay is
+measured by window_delay.py.
 
   start   Starts the consumer; call it after the topic `advisories` is recreated and before the job starts.
   stop    Stops it, prints p50/p95/p99/max per stage and appends a summary to bench/results/advisory_latency.jsonl.

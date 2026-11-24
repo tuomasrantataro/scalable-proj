@@ -529,7 +529,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Reasons** (architecture \u00a73.8)\n\n| Reason | Handling |\n|---|---|\n| `LATE` | dropped: event time behind the watermark (60 s bound) |\n| `TIME_SKEW` | kept: trading time far from the system time |\n| `PRICE_JUMP` | kept: close moved > 10 % from the previous close |\n| `ZERO_PRICE` | dropped, counted in the log only |\n| `MALFORMED`, `NEGATIVE_PRICE`, `IMPLAUSIBLE_TIME`, `TRADING_DATE_MISMATCH`, `WINDOW_OUT_OF_ORDER` | none in the dataset |\n\nTimes are local exchange time (CET) shown as UTC, as stored (architecture \u00a73.3). The default range is the trading week of the dataset, 8\u201312 Nov 2021."
+        "content": "**Reasons** (architecture \u00a73.8)\n\n| Reason | Handling |\n|---|---|\n| `LATE` | dropped: event time behind the watermark (1 s bound) |\n| `TIME_SKEW` | kept: trading time far from the system time |\n| `PRICE_JUMP` | kept: close moved > 10 % from the previous close |\n| `ZERO_PRICE` | dropped, counted in the log only |\n| `MALFORMED`, `NEGATIVE_PRICE`, `IMPLAUSIBLE_TIME`, `TRADING_DATE_MISMATCH`, `WINDOW_OUT_OF_ORDER` | none in the dataset |\n\nTimes are local exchange time (CET) shown as UTC, as stored (architecture \u00a73.3). The default range is the trading week of the dataset, 8\u201312 Nov 2021."
       }
     },
     {

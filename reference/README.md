@@ -25,7 +25,7 @@ and `initial` marks bit for bit. The md5 of `output-nozero` in the export format
 reference.
 
 Options of `ema_reference.py`: `--data-dir` (default `data`), `--out` (default `reference/output`), `--files` (some days only),
-`--exclude-zero-prices`, `--lateness SECONDS` (default 60, `inf` keeps late events), `--jobs` (files read
+`--exclude-zero-prices`, `--lateness SECONDS` (default 1, as the job; `inf` keeps late events), `--jobs` (files read
 in parallel).
 
 Outputs (git-ignored), timestamps in naive local exchange time:
