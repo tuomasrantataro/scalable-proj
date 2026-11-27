@@ -1,5 +1,7 @@
 # Measurements
 
+This document contains lots of measurements collected through the project. References to other documents may be stale. This document also includes results for implementations which no longer appear in the final project.
+
 Measurements of the Kafka → Flink → TimescaleDB pipeline. Until 2026-11-20 the broker was Apache Iggy; those
 measurements, the connector findings and the reasons for replacing it are in [`docs/iggy.md`](docs/iggy.md).
 

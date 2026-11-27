@@ -61,31 +61,6 @@ What is left for you:
 
 Parts A and B below are the same steps by hand.
 
-## Which requirement is covered where
-
-From the project description (PD) and the evaluation criteria (EC), both in `docs/`.
-
-| Requirement | Shown by | Step |
-|---|---|---|
-| Functionality: correct EMA38 / EMA100 per window (PD 3.2) | Full week equal to the pandas reference, bit for bit | A5, A11 |
-| Functionality: correct buy/sell advisories for all subscribed symbols (PD 3.3) | Delivered messages against reference and subscriptions; every symbol in A11 | A5, A11 |
-| Windows of 5 min from 00:00, evaluated once the next one starts (PD 3.1) | Grafana "Correctness" checks; delay from the window's end | A8, A11 |
-| Performance: the entire week, high throughput | Stored week at full speed; live week | A5, A6, A11 |
-| Performance: low and stable latency under load | Load/latency sweep; latency over the run | A8, A9, A11 |
-| Scalability: exchanges, event volumes, peak rates | Busiest minute overall and per exchange, up to the maximum | A9 |
-| Scalability: long-tail symbol distribution | Distribution, balance over partitions and subtasks, uniform workload | A3, A7 |
-| Scalability: more resources (CPU), utilization | 1 to 8 TaskManagers: time, speedup, CPU, memory. GPU: none used, say so | A6 |
-| Scalability: more symbols, more subscribers | Up to 80,000 symbols per close; 1 to 1,000 traders | A10, A10b |
-| Different event types; tick and housekeeping events; attributes (metadata) | Event types per exchange and security type; what the job did with each | A3, A5 |
-| Out-of-order and late events | `LATE` and `TIME_SKEW` counts; results for several bounds | A5, A8 |
-| Dataset analysis (EC, academic writing) | Event types, symbol distribution, peaks, disorder | A3, A9 |
-| Creative explorations: alternatives backed by measurements | Table in A10c | A3, A6–A8, A10c |
-| Smart visualization (PD 3.4) | Screenshots of Grafana with the week's results | A11 |
-
-Not measurements, but required in the report: architecture and implementation text (normalization, metadata, hardware,
-tools), individual answers, 4–5 pages in the ACM template. See [`docs/requirements.md`](docs/requirements.md) §5–§6 and
-[`NOTES_FOR_REPORT.md`](NOTES_FOR_REPORT.md).
-
 ## Rules
 
 - **One measurement at a time, and nothing else running on the host.** Close the editor and the browser (also Grafana
