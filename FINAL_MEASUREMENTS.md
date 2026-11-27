@@ -62,7 +62,7 @@ Parts A and B below are the same steps by hand.
 
 ## Which requirement is covered where
 
-From the project description (PD) and the evaluation criteria (EC), both in `docs/`.
+From the project description (PD, in `docs/`) and the requirements in [`docs/requirements.md`](docs/requirements.md).
 
 | Requirement | Shown by | Step |
 |---|---|---|
@@ -77,13 +77,12 @@ From the project description (PD) and the evaluation criteria (EC), both in `doc
 | Scalability: more symbols, more subscribers | Up to 80,000 symbols per close; 1 to 1,000 traders | A10, A10b |
 | Different event types; tick and housekeeping events; attributes (metadata) | Event types per exchange and security type; what the job did with each | A3, A5 |
 | Out-of-order and late events | `LATE` and `TIME_SKEW` counts; results for several bounds | A5, A8 |
-| Dataset analysis (EC, academic writing) | Event types, symbol distribution, peaks, disorder | A3, A9 |
+| Dataset analysis | Event types, symbol distribution, peaks, disorder | A3, A9 |
 | Creative explorations: alternatives backed by measurements | Table in A10c | A3, A6–A8, A10c |
 | Smart visualization (PD 3.4) | Screenshots of Grafana with the week's results | A11 |
 
 Not measurements, but required in the report: architecture and implementation text (normalization, metadata, hardware,
-tools), individual answers, 4–5 pages in the ACM template. See [`docs/requirements.md`](docs/requirements.md) §5–§6 and
-[`NOTES_FOR_REPORT.md`](NOTES_FOR_REPORT.md).
+tools), individual answers, 4–5 pages in the ACM template. See [`docs/requirements.md`](docs/requirements.md) §5–§6.
 
 ## Rules
 

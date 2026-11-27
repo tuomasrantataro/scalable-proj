@@ -38,7 +38,23 @@ symbol either way.
 
 Run the commands in the repository root.
 
+### Copy the dataset files to ./data
+First, copy the test dataset manually to ./data folder. The file `pala.csv` is already there as an example. Contents of that folder should be similar to this:
+```
+.
+├── data
+│   ├── debs2022-gc-trading-day-08-11-21.csv
+│   ├── debs2022-gc-trading-day-09-11-21.csv
+│   ├── debs2022-gc-trading-day-10-11-21.csv
+│   ├── debs2022-gc-trading-day-11-11-21.csv
+│   ├── debs2022-gc-trading-day-12-11-21.csv
+│   ├── debs2022-gc-trading-day-13-11-21.csv
+│   ├── debs2022-gc-trading-day-14-11-21.csv
+│   ├── pala.csv
+```
+
 ### Start the system and submit the test dataset
+This command takes about 5-10 minutes on author's computer. To see visual progress, open Grafana at `localhost:3001` and set refresh rate from the `Refresh` button at top right corner.
 
 ```bash
 export TASKMANAGERS=4 PARALLELISM=4 PRODUCER_THREADS=8    # optional; the defaults are 2, 2 and 4
@@ -61,6 +77,8 @@ To only start the services, without sending data: `docker compose up -d --build`
 
 The system keeps running after the replay. Open Grafana at http://localhost:3001; the market dashboards show local
 exchange time as UTC and default to the dataset's week (8–14 Nov 2021).
+
+Alternatively check data straigth from the containers.
 
 ```bash
 docker compose exec timescaledb psql -U postgres -d trading -c 'SELECT type, count(*) FROM advisories GROUP BY 1'

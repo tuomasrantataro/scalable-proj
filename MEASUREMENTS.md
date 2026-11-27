@@ -22,7 +22,7 @@ upserts by default, and the full week from a stored backlog takes a third less t
 ## 1. Full week: results identical to Iggy, finished faster
 
 Fresh stack (`docker compose down -v`), job started, then the 7 files replayed one after another while the job
-ran (the commands in [`start-from-scratch.sh`](start-from-scratch.sh)).
+ran (as [`scripts/run-live.sh`](scripts/run-live.sh) now does).
 
 **Correctness.** The job's output was exported (`ema_window`: symbol, window_end, close, ticks, ema38, ema100,
 advisory, initial; `data_issue`: reason, symbol, event_time, price, detail) and compared with the same export of
