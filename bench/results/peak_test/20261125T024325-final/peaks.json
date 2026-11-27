@@ -1,0 +1,26 @@
+[
+ {
+  "scope": "all",
+  "day": "10",
+  "minute": "15:30",
+  "rows": 275558
+ },
+ {
+  "scope": "FR",
+  "day": "08",
+  "minute": "09:00",
+  "rows": 167906
+ },
+ {
+  "scope": "NL",
+  "day": "10",
+  "minute": "15:30",
+  "rows": 98112
+ },
+ {
+  "scope": "ETR",
+  "day": "10",
+  "minute": "15:30",
+  "rows": 36934
+ }
+]

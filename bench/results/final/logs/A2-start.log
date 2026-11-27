@@ -1,0 +1,206 @@
+ Image scalable/flink-job Building 
+ Image scalable/producer-rs Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.10kB done
+#1 DONE 0.0s
+
+#2 [kafka-setup internal] load build definition from Dockerfile
+#2 transferring dockerfile: 978B done
+#2 DONE 0.0s
+
+#3 [jobmanager internal] load build definition from Dockerfile
+#3 transferring dockerfile: 791B done
+#3 DONE 0.0s
+
+#4 [kafka-setup internal] load metadata for docker.io/library/debian:bookworm-slim
+#4 DONE 0.1s
+
+#5 [jobmanager internal] load metadata for docker.io/library/maven:3.9-eclipse-temurin-17
+#5 DONE 0.1s
+
+#6 [kafka-setup internal] load metadata for docker.io/library/rust:1.98.1-slim-bookworm
+#6 DONE 0.1s
+
+#7 [jobmanager internal] load metadata for docker.io/library/flink:2.3.0-java17
+#7 DONE 0.1s
+
+#8 [kafka-setup internal] load .dockerignore
+#8 transferring context: 107B done
+#8 DONE 0.0s
+
+#9 [kafka-setup internal] load build context
+#9 DONE 0.0s
+
+#10 [jobmanager internal] load .dockerignore
+#10 transferring context: 2B done
+#10 DONE 0.0s
+
+#11 [jobmanager internal] load build context
+#11 DONE 0.0s
+
+#12 [kafka-setup stage-1 1/2] FROM docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+#12 resolve docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc 0.1s done
+#12 DONE 0.1s
+
+#13 [kafka-setup build 1/7] FROM docker.io/library/rust:1.98.1-slim-bookworm@sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730
+#13 resolve docker.io/library/rust:1.98.1-slim-bookworm@sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730 0.1s done
+#13 DONE 0.1s
+
+#14 [jobmanager build 1/6] FROM docker.io/library/maven:3.9-eclipse-temurin-17@sha256:1a352420f7aba21f5ad08df31bab55f74c013fb491f1ae8ab1dd7ff9ed698584
+#14 resolve docker.io/library/maven:3.9-eclipse-temurin-17@sha256:1a352420f7aba21f5ad08df31bab55f74c013fb491f1ae8ab1dd7ff9ed698584 0.1s done
+#14 DONE 0.1s
+
+#15 [jobmanager stage-1 1/3] FROM docker.io/library/flink:2.3.0-java17@sha256:f64c0809c2adb7537a139736cbaa62ecff20e283bb1ea4a4e119d9a40ee75c0f
+#15 resolve docker.io/library/flink:2.3.0-java17@sha256:f64c0809c2adb7537a139736cbaa62ecff20e283bb1ea4a4e119d9a40ee75c0f 0.1s done
+#15 DONE 0.1s
+
+#9 [kafka-setup internal] load build context
+#9 transferring context: 443B done
+#9 DONE 0.0s
+
+#16 [kafka-setup build 6/7] COPY src ./src
+#16 CACHED
+
+#17 [kafka-setup build 4/7] COPY Cargo.toml Cargo.lock ./
+#17 CACHED
+
+#18 [kafka-setup build 7/7] RUN touch src/main.rs && cargo test --release --locked && cargo build --release --locked
+#18 CACHED
+
+#19 [kafka-setup build 2/7] RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ make libcurl4-openssl-dev && rm -rf /var/lib/apt/lists/*
+#19 CACHED
+
+#20 [kafka-setup build 3/7] WORKDIR /build
+#20 CACHED
+
+#21 [kafka-setup build 5/7] RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release --locked && rm -rf src
+#21 CACHED
+
+#22 [kafka-setup stage-1 2/2] COPY --from=build /build/target/release/replay-producer /app/replay-producer
+#22 CACHED
+
+#11 [jobmanager internal] load build context
+#11 transferring context: 4.43kB done
+#11 DONE 0.0s
+
+#23 [jobmanager build 2/6] WORKDIR /build
+#23 CACHED
+
+#24 [jobmanager build 6/6] RUN mvn -q -B package
+#24 CACHED
+
+#25 [jobmanager build 3/6] COPY pom.xml .
+#25 CACHED
+
+#26 [jobmanager stage-1 2/3] COPY --from=build /build/target/flink-job.jar /opt/flink/usrlib/flink-job.jar
+#26 CACHED
+
+#27 [jobmanager build 4/6] RUN mvn -q -B dependency:go-offline
+#27 CACHED
+
+#28 [jobmanager build 5/6] COPY src ./src
+#28 CACHED
+
+#29 [jobmanager stage-1 3/3] RUN mkdir -p /flink-checkpoints && chown flink:flink /flink-checkpoints
+#29 CACHED
+
+#30 [jobmanager] exporting to image
+#30 exporting layers
+#30 exporting layers done
+#30 exporting manifest sha256:63df1d4978bdd4afc426d257420db6d502b902ff684712134e4b5cf0429eaf56 0.0s done
+#30 exporting config sha256:91d537572beec38abf1523bb8e36efcabd4fe2f95ece43309d5237a51be58bd9 0.0s done
+#30 exporting attestation manifest sha256:9a7e2703471a919e87025eeb50fe28c6eeb57b4f459da390d54e407b99b07b28 0.0s done
+#30 exporting manifest list sha256:27116d63fb807bcb7abadca4d4f4dcdaf2c1a797c0627558eee0ad1975c5960b
+#30 exporting manifest list sha256:27116d63fb807bcb7abadca4d4f4dcdaf2c1a797c0627558eee0ad1975c5960b 0.0s done
+#30 naming to docker.io/scalable/flink-job:latest done
+#30 unpacking to docker.io/scalable/flink-job:latest 0.0s done
+#30 DONE 0.2s
+
+#31 [kafka-setup] exporting to image
+#31 exporting layers done
+#31 exporting manifest sha256:85c7cd04c21b5dbe7ab75d252a2eb89d20e6735d4ff51ccff4368fe61ae66e8d done
+#31 exporting config sha256:52ae2e79cc7a3fc699a413f910c9e9f4ee9c2145869187303e7a5e6fba4d7de1 done
+#31 exporting attestation manifest sha256:8b32011fed3316fb34b59d3cc2291d700e279a1a6bc4e1777f544feb4a6651f3 0.0s done
+#31 exporting manifest list sha256:c8f5d26833010638f9fd53d057220c95fed7fdf67a4ca24673e432ee937436f4 0.0s done
+#31 naming to docker.io/scalable/producer-rs:latest 0.0s done
+#31 unpacking to docker.io/scalable/producer-rs:latest 0.0s done
+#31 DONE 0.2s
+
+#32 [kafka-setup] resolving provenance for metadata file
+#32 DONE 0.0s
+
+#33 [jobmanager] resolving provenance for metadata file
+#33 DONE 0.0s
+ Image scalable/producer-rs Built 
+ Image scalable/flink-job Built 
+ Volume scalable-proj_grafana-data Creating 
+ Volume scalable-proj_kafka-data Creating 
+ Volume scalable-proj_timescale-data Creating 
+ Network scalable-proj_default Creating 
+ Volume scalable-proj_flink-checkpoints Creating 
+ Volume scalable-proj_prometheus-data Creating 
+ Volume scalable-proj_grafana-data Created 
+ Volume scalable-proj_flink-checkpoints Created 
+ Volume scalable-proj_kafka-data Created 
+ Volume scalable-proj_timescale-data Created 
+ Volume scalable-proj_prometheus-data Created 
+ Network scalable-proj_default Created 
+ Container scalable-proj-kafka-1 Creating 
+ Container scalable-proj-prometheus-1 Creating 
+ Container scalable-proj-timescaledb-1 Creating 
+ Container scalable-proj-cadvisor-1 Creating 
+ Container scalable-proj-prometheus-1 Created 
+ Container scalable-proj-cadvisor-1 Created 
+ Container scalable-proj-kafka-1 Created 
+ Container scalable-proj-timescaledb-1 Created 
+ Container scalable-proj-kafka-setup-1 Creating 
+ Container scalable-proj-grafana-1 Creating 
+ Container scalable-proj-db-setup-1 Creating 
+ Container scalable-proj-kafka-setup-1 Created 
+ Container scalable-proj-db-setup-1 Created 
+ Container scalable-proj-jobmanager-1 Creating 
+ Container scalable-proj-grafana-1 Created 
+ Container scalable-proj-jobmanager-1 Created 
+ Container scalable-proj-taskmanager-4 Creating 
+ Container scalable-proj-taskmanager-3 Creating 
+ Container scalable-proj-taskmanager-2 Creating 
+ Container scalable-proj-taskmanager-1 Creating 
+ Container scalable-proj-taskmanager-3 Created 
+ Container scalable-proj-taskmanager-2 Created 
+ Container scalable-proj-taskmanager-4 Created 
+ Container scalable-proj-taskmanager-1 Created 
+ Container scalable-proj-cadvisor-1 Starting 
+ Container scalable-proj-kafka-1 Starting 
+ Container scalable-proj-prometheus-1 Starting 
+ Container scalable-proj-timescaledb-1 Starting 
+ Container scalable-proj-cadvisor-1 Started 
+ Container scalable-proj-kafka-1 Started 
+ Container scalable-proj-kafka-1 Waiting 
+ Container scalable-proj-prometheus-1 Started 
+ Container scalable-proj-timescaledb-1 Started 
+ Container scalable-proj-timescaledb-1 Waiting 
+ Container scalable-proj-timescaledb-1 Healthy 
+ Container scalable-proj-db-setup-1 Starting 
+ Container scalable-proj-grafana-1 Starting 
+ Container scalable-proj-kafka-1 Healthy 
+ Container scalable-proj-kafka-setup-1 Starting 
+ Container scalable-proj-db-setup-1 Started 
+ Container scalable-proj-db-setup-1 Waiting 
+ Container scalable-proj-grafana-1 Started 
+ Container scalable-proj-kafka-setup-1 Started 
+ Container scalable-proj-kafka-setup-1 Waiting 
+ Container scalable-proj-db-setup-1 Exited 
+ Container scalable-proj-kafka-setup-1 Exited 
+ Container scalable-proj-jobmanager-1 Starting 
+ Container scalable-proj-jobmanager-1 Started 
+ Container scalable-proj-taskmanager-1 Starting 
+ Container scalable-proj-taskmanager-1 Started 
+ Container scalable-proj-taskmanager-2 Starting 
+ Container scalable-proj-taskmanager-2 Started 
+ Container scalable-proj-taskmanager-3 Starting 
+ Container scalable-proj-taskmanager-3 Started 
+ Container scalable-proj-taskmanager-4 Starting 
+ Container scalable-proj-taskmanager-4 Started 
+ticks                      0 records in 8 partitions
+ticks-uniform  not loaded
+job            running: trading-trends-ema

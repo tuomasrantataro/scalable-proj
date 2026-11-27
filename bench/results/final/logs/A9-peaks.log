@@ -1,0 +1,124 @@
+   all: 10 Nov 15:30, 275,558 rows (4,593 events/s)
+    FR: 08 Nov 09:00, 167,906 rows (2,798 events/s)
+    NL: 10 Nov 15:30, 98,112 rows (1,635 events/s)
+   ETR: 10 Nov 15:30, 36,934 rows (616 events/s)
+== cutting slice 10-1515-1600-all.csv
+   10-1515-1600-all.csv: 6,862,000 rows, 0 ahead of the feed clock left out
+== cutting slice 08-0845-0930-FR.csv
+   08-0845-0930-FR.csv: 2,394,982 rows, 5379 ahead of the feed clock left out
+== cutting slice 10-1515-1600-NL.csv
+   10-1515-1600-NL.csv: 2,171,148 rows, 0 ahead of the feed clock left out
+== cutting slice 10-1515-1600-ETR.csv
+   10-1515-1600-ETR.csv: 1,114,124 rows, 0 ahead of the feed clock left out
+== point 1/16: all 10x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 04b9ce87f85749320cf47297deb080c8 RUNNING at 02:43:57 UTC
+   25,405 events/s (peak minute 45,926/s): keeps up; lag max 0 end 0 (54 samples); fired → received p50 / p99 / max 174 / 292 / 298 ms
+== point 2/16: all 30x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job dc9d86632bd9c0c78cf7bfbc6b3fc95e RUNNING at 02:50:06 UTC
+   76,219 events/s (peak minute 137,778/s): keeps up; lag max 0 end 0 (18 samples); fired → received p50 / p99 / max 174 / 285 / 285 ms
+== point 3/16: all 100x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job e5bd2fa7296a453490182248a30e9aa9 RUNNING at 02:53:15 UTC
+   254,054 events/s (peak minute 459,258/s): keeps up; lag max 0 end 0 (5 samples); fired → received p50 / p99 / max 286 / 502 / 504 ms
+== point 4/16: all max
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 999432441ac844cbe63f6efa95747d43 RUNNING at 02:55:20 UTC
+   768,421 events/s (peak minute –/s): n/a; lag max 0 end 0 (1 samples); fired → received p50 / p99 / max 415 / 697 / 697 ms
+== point 5/16: FR 10x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 72a288e0bd0c2b78a3d84b721ecf2dfb RUNNING at 02:57:09 UTC
+   8,870 events/s (peak minute 27,984/s): keeps up; lag max 0 end 0 (54 samples); fired → received p50 / p99 / max 20 / 35 / 83 ms
+== point 6/16: FR 30x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 508a3af439874bd7c22c5297041e57ed RUNNING at 03:03:17 UTC
+   26,611 events/s (peak minute 83,953/s): keeps up; lag max 0 end 0 (18 samples); fired → received p50 / p99 / max 25 / 98 / 98 ms
+== point 7/16: FR 100x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 6bf3fe8704f677f775aa0a64165d8cee RUNNING at 03:06:26 UTC
+   88,703 events/s (peak minute 279,843/s): keeps up; lag max 0 end 0 (5 samples); fired → received p50 / p99 / max 26 / 53 / 95 ms
+== point 8/16: FR max
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 3a6e3e73db0c84f8c82cde922716f502 RUNNING at 03:08:32 UTC
+   453,595 events/s (peak minute –/s): n/a; lag max 17,264 end 17,264 (1 samples); fired → received p50 / p99 / max 102 / 152 / 162 ms
+== point 9/16: NL 10x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job cc47be06d2b511805a6321bffecb5015 RUNNING at 03:10:16 UTC
+   8,038 events/s (peak minute 16,352/s): keeps up; lag max 0 end 0 (54 samples); fired → received p50 / p99 / max 60 / 122 / 122 ms
+== point 10/16: NL 30x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job e53a463fd765e502428e4d50a0b08498 RUNNING at 03:16:24 UTC
+   24,116 events/s (peak minute 49,056/s): keeps up; lag max 0 end 0 (18 samples); fired → received p50 / p99 / max 43 / 89 / 92 ms
+== point 11/16: NL 100x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 0557fcc0e556345b7c7ed11c0c37aa84 RUNNING at 03:19:32 UTC
+   80,383 events/s (peak minute 163,518/s): keeps up; lag max 0 end 0 (5 samples); fired → received p50 / p99 / max 15 / 95 / 95 ms
+== point 12/16: NL max
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job adb089270508fe7af6ea93cebf89b02b RUNNING at 03:21:38 UTC
+   555,281 events/s (peak minute –/s): n/a; lag max None end None (0 samples); fired → received p50 / p99 / max 64 / 171 / 171 ms
+== point 13/16: ETR 10x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job aa306618c7306e0ea37bb0d7b5c3fcac RUNNING at 03:23:20 UTC
+   4,125 events/s (peak minute 6,155/s): keeps up; lag max 0 end 0 (54 samples); fired → received p50 / p99 / max 85 / 102 / 103 ms
+== point 14/16: ETR 30x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 61717231748c85b10843fcceb1a08d4a RUNNING at 03:29:29 UTC
+   12,375 events/s (peak minute 18,466/s): keeps up; lag max 0 end 0 (18 samples); fired → received p50 / p99 / max 50 / 102 / 102 ms
+== point 15/16: ETR 100x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job dbbb14af9d3eaa5f4952e691738971cd RUNNING at 03:32:37 UTC
+   41,249 events/s (peak minute 61,553/s): keeps up; lag max 0 end 0 (5 samples); fired → received p50 / p99 / max 27 / 97 / 98 ms
+== point 16/16: ETR max
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job a6a15750b0244d3894d9cd81e19789e6 RUNNING at 03:34:42 UTC
+   336,593 events/s (peak minute –/s): n/a; lag max None end None (0 samples); fired → received p50 / p99 / max 83 / 420 / 421 ms
+
+# Peak test
+
+| Scope | Busiest minute | Rows in it | Real peak (events/s) |
+|---|---|---|---|
+| all | 10 Nov 15:30 | 275,558 | 4,593 |
+| FR | 08 Nov 09:00 | 167,906 | 2,798 |
+| NL | 10 Nov 15:30 | 98,112 | 1,635 |
+| ETR | 10 Nov 15:30 | 36,934 | 616 |
+
+Latencies in ms, without the first window close. Lag in seconds of input at the achieved rate.
+
+| Scope | Speed | Events/s (achieved) | Peak minute / second (nominal/s) | Verdict | Lag max / end (s; samples) | Busiest task busy/bp (ms/s) | CPU % TaskManagers / TimescaleDB / Kafka / producer | Window fired → EMA p50 / p99 / max | Advisory fired → received p50 / p99 / max | Advisories (initial) | Window p95 per third of the run |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| all | 10× | 25,405 | 45,926 / 104,350 | keeps up | 0.0 / 0.0 (54) | Source:_kafka_source 4/0 | 37 / 2 / 42 / 16 | 3 / 264 / 286 | 174 / 292 / 298 | 3,647 (3,647) | 259 → 98 → 99 |
+| all | 30× | 76,219 | 137,778 / 313,050 | keeps up | 0.0 / 0.0 (18) | Source:_kafka_source 11/0 | 72 / 3 / 50 / 47 | 3 / 255 / 277 | 174 / 285 / 285 | 3,647 (3,647) | 252 → 75 → 98 |
+| all | 100× | 254,054 | 459,258 / 1,043,500 | keeps up | 0.0 / 0.0 (5) | Source:_kafka_source 60/0 | 174 / 4 / 57 / 127 | 3 / 452 / 497 | 286 / 502 / 504 | 3,647 (3,647) | 432 → 55 → 61 |
+| all | max | 768,421 | – / – | n/a | 0.0 / 0.0 (1) | Source:_kafka_source 398/0 | 188 / 5 / 37 / – | 11 / 574 / 674 | 415 / 697 / 697 | 3,647 (3,647) | 623 → 82 → 78 |
+| FR | 10× | 8,870 | 27,984 / 62,680 | keeps up | 0.0 / 0.0 (54) | Source:_kafka_source 3/0 | 31 / 2 / 39 / 6 | 3 / 99 / 100 | 20 / 35 / 83 | 878 (878) | 99 → 32 → 20 |
+| FR | 30× | 26,611 | 83,953 / 188,040 | keeps up | 0.0 / 0.0 (18) | Source:_kafka_source 4/0 | 53 / 3 / 45 / 18 | 3 / 98 / 99 | 25 / 98 / 98 | 878 (878) | 96 → 95 → 75 |
+| FR | 100× | 88,703 | 279,843 / 626,800 | keeps up | 0.0 / 0.0 (5) | Source:_kafka_source 16/0 | 98 / 3 / 48 / 27 | 3 / 94 / 99 | 26 / 53 / 95 | 878 (878) | 92 → 47 → 13 |
+| FR | max | 453,595 | – / – | n/a | 0.0 / 0.0 (1) | Source:_kafka_source 361/0 | 252 / 2 / 35 / – | 23 / 119 / 129 | 102 / 152 / 162 | 999 (999) | 118 → 99 → 88 |
+| NL | 10× | 8,038 | 16,352 / 43,350 | keeps up | 0.0 / 0.0 (54) | ema 3/0 | 26 / 2 / 39 / 6 | 60 / 118 / 120 | 60 / 122 / 122 | 469 (469) | 117 → 100 → 100 |
+| NL | 30× | 24,116 | 49,056 / 130,050 | keeps up | 0.0 / 0.0 (18) | Source:_kafka_source 5/0 | 42 / 2 / 46 / 17 | 51 / 100 / 100 | 43 / 89 / 92 | 469 (469) | 91 → 75 → 100 |
+| NL | 100× | 80,383 | 163,518 / 433,500 | keeps up | 0.0 / 0.0 (5) | Source:_kafka_source 10/0 | 73 / 2 / 46 / 45 | 39 / 95 / 95 | 15 / 95 / 95 | 44 (44) | 94 → 90 → 91 |
+| NL | max | 555,281 | – / – | n/a | – / – (0) | – | 22 / 2 / – / – | 48 / 113 / 121 | 64 / 171 / 171 | 44 (44) | 113 → 97 → 95 |
+| ETR | 10× | 4,125 | 6,155 / 15,500 | keeps up | 0.0 / 0.0 (54) | ema 3/0 | 31 / 2 / 41 / 5 | 84 / 101 / 101 | 85 / 102 / 103 | 333 (333) | 100 → 100 → 101 |
+| ETR | 30× | 12,375 | 18,466 / 46,500 | keeps up | 0.0 / 0.0 (18) | Source:_kafka_source 6/0 | 55 / 2 / 47 / 13 | 49 / 100 / 101 | 50 / 102 / 102 | 333 (333) | 100 → 63 → 100 |
+| ETR | 100× | 41,249 | 61,553 / 155,000 | keeps up | 0.0 / 0.0 (5) | window_5min 13/0 | 88 / 3 / 43 / 36 | 25 / 95 / 96 | 27 / 97 / 98 | 333 (333) | 94 → 90 → 90 |
+| ETR | max | 336,593 | – / – | n/a | – / – (0) | – | 21 / 2 / 36 / – | 45 / 366 / 379 | 83 / 420 / 421 | 333 (333) | 378 → 101 → 98 |
+
+== done: bench/results/peak_test/20261125T024325-final

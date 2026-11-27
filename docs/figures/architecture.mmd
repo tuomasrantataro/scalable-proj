@@ -1,0 +1,13 @@
+%%{init: {"htmlLabels": false, "fontFamily": "Liberation Sans, Arial, sans-serif", "theme": "neutral", "themeVariables": {"fontFamily": "Liberation Sans, Arial, sans-serif", "fontSize": "15px"}, "flowchart": {"rankSpacing": 28, "nodeSpacing": 18, "padding": 6, "wrappingWidth": 220}}}%%
+flowchart LR
+    CSV[/"DEBS 2022<br/>CSV files"/] --> PROD["Replay<br/>producer"]
+    PROD --> TICKS[["Kafka<br/>ticks"]]
+    subgraph FLINK["Flink job (keyed by symbol)"]
+        direction TB
+        PARSE["Parse, watermark,<br/>quality gate"] --> WIN["5-min window<br/>close price"] --> EMA["EMA38/EMA100,<br/>crossovers"]
+    end
+    TICKS --> PARSE
+    EMA -->|"BUY/SELL"| ADV[["Kafka<br/>advisories"]]
+    ADV --> TR(["Traders"])
+    EMA -.-> DB[("TimescaleDB")]
+    DB -.-> GRAF["Grafana"]

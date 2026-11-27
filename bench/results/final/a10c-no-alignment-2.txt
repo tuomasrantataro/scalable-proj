@@ -1,0 +1,28 @@
+== backlog of 289,116,808 records (real); TaskManagers=4 slots=1 parallelism=4 group=backlog-20261125T063418 {'WATERMARK_ALIGNMENT_S': '0'}
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 8fe8e12b634ba34103b4b20d43b6a935 RUNNING at 06:34:42 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   7      514      749      749
+   emitted → stored                  5       90      154      154
+   stored → received                 2       19       26       26
+   fired → received (total)         20      568      842      842
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 106 ms, max 106 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 80.8 s (job RUNNING → last output row): 3,580,350 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,615,937/s, max 3,773,209/s
+   output: 1,855,843 ema_window rows, 7772 BUY, 3583 SELL; issues {'LATE': '4906', 'TIME_SKEW': '6681', 'PRICE_JUMP': '640'}
+   digest 14589aec8d88992276f0fc005b449b81
+   busy / backpressured ms/s (avg over subtasks):
+       932 /   15  Source:_kafka_source____quality_gate
+       541 /    0  timescaledb_ema:_Writer
+       424 /   15  window_5min____late_events
+        67 /  104  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+        10 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         3 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 901, timescaledb 110, kafka 109, jobmanager 44, cadvisor 1, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 3893, kafka 1373, taskmanager heap 1341, jobmanager 488, prometheus 280, timescaledb 268, grafana 139, cadvisor 40, advisory-latency 3
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.047, price events into window 1.1, windows into ema 1.034
+   busy time, max/mean over subtasks: Source:_kafka_source 1.016, ema 1.019, timescaledb_ema:_Writer 1.028, window_5min 1.092
+   appended to bench/results/backlog_runs.jsonl

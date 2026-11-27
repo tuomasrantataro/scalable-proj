@@ -1,0 +1,4 @@
+subscriptions  subscriptions.txt: 5 traders
+messages       73 (0 repeats)
+delivered      73 of 73 expected, 0 missing, 0 unexpected
+CORRECT

@@ -1,0 +1,3 @@
+ticks                      0 records in 8 partitions
+ticks-uniform  not loaded
+job            running: trading-trends-ema

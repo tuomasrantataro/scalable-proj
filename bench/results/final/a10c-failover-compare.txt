@@ -1,0 +1,10 @@
+ok   rows unique  no (symbol, window) twice
+ok   windows      1,855,645 in both, 0 only in the reference, 0 only in the job
+ok   ticks        0 differ
+ok   close        0 differ
+ok   ema38        0 differ
+ok   ema100       0 differ
+ok   advisory     0 differ; reference: BUY 7,769, SELL 3,580
+ok   initial      0 differ; reference: marked 4,970
+ok   digest       job 19413a509d53044973e3e6b76c177af1, reference 19413a509d53044973e3e6b76c177af1
+identical

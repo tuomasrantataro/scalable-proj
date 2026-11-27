@@ -1,0 +1,36 @@
+   all: 10 Nov 15:30, 275,558 rows (4,593 events/s)
+   10-0900-1730-all.csv: 62,750,000 rows, 0 ahead of the feed clock left out
+== point 1/3: all 100x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 6b1ef0453a03f2fd9f61356d10bb3f8c RUNNING at 03:36:26 UTC
+   205,065 events/s (peak minute 459,258/s): keeps up; lag max 0 end 0 (61 samples); fired → received p50 / p99 / max 6 / 92 / 98 ms
+== point 2/3: all 300x
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job b72119b09697c3648e6a87f8b460ff2e RUNNING at 03:43:12 UTC
+   615,196 events/s (peak minute 1,377,775/s): keeps up; lag max 0 end 0 (20 samples); fired → received p50 / p99 / max 13 / 96 / 112 ms
+== point 3/3: all max
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 8efcc6c158068c70e54231e3221bd9b6 RUNNING at 03:46:34 UTC
+   1,126,773 events/s (peak minute –/s): keeps up; lag max 0 end 0 (11 samples); fired → received p50 / p99 / max 13 / 110 / 117 ms
+
+# Peak test
+
+| Scope | Busiest minute | Rows in it | Real peak (events/s) |
+|---|---|---|---|
+| all | 10 Nov 15:30 | 275,558 | 4,593 |
+
+Latencies in ms, without the first window close. Lag in seconds of input at the achieved rate.
+
+| Scope | Speed | Events/s (achieved) | Peak minute / second (nominal/s) | Verdict | Lag max / end (s; samples) | Busiest task busy/bp (ms/s) | CPU % TaskManagers / TimescaleDB / Kafka / producer | Window fired → EMA p50 / p99 / max | Advisory fired → received p50 / p99 / max | Advisories (initial) | Window p95 per third of the run |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| all | 100× | 205,065 | 459,258 / 2,150,300 | keeps up | 0.0 / 0.0 (61) | Source:_kafka_source 25/0 | 61 / 5 / 51 / 113 | 2 / 93 / 98 | 6 / 92 / 98 | 868 (868) | 82 → 76 → 88 |
+| all | 300× | 615,196 | 1,377,775 / 6,450,900 | keeps up | 0.0 / 0.0 (20) | Source:_kafka_source 97/0 | 171 / 13 / 65 / 313 | 2 / 98 / 103 | 13 / 96 / 112 | 868 (868) | 87 → 86 → 91 |
+| all | max | 1,126,773 | – / – | keeps up | 0.0 / 0.0 (11) | Source:_kafka_source 234/0 | 294 / 27 / 87 / 636 | 3 / 96 / 102 | 13 / 110 / 117 | 868 (868) | 82 → 88 → 82 |
+
+== done: bench/results/peak_test/20261125T033554-final-session
+wrote bench/results/peak_test/20261125T033554-final-session/stability-all-100x.png
+wrote bench/results/peak_test/20261125T033554-final-session/stability-all-300x.png
+wrote bench/results/peak_test/20261125T033554-final-session/stability-all-max.png

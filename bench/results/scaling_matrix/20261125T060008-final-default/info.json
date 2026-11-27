@@ -1,0 +1,17 @@
+{
+ "configs": [
+  {
+   "spec": "4x1",
+   "taskmanagers": 4,
+   "slots": 1,
+   "parallelism": 4
+  }
+ ],
+ "repeats": 3,
+ "baseline": null,
+ "settings": {},
+ "workload": "real",
+ "cpus": 16,
+ "records": 289116808,
+ "partitions": 8
+}

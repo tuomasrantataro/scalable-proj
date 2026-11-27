@@ -1,0 +1,10 @@
+== stopping Flink, recreating topic ticks-uniform with 8 partitions
+   [replay-producer] setup done: topic ticks-uniform with 8 partitions
+   debs2022-gc-trading-day-08-11-21.csv: replay done: sent 53994554 messages (2047 distinct symbols) in 32.68 s (first to last row sent: 32.56 s)
+   debs2022-gc-trading-day-09-11-21.csv: replay done: sent 58811870 messages (2047 distinct symbols) in 36.16 s (first to last row sent: 36.03 s)
+   debs2022-gc-trading-day-10-11-21.csv: replay done: sent 64591844 messages (2047 distinct symbols) in 39.20 s (first to last row sent: 39.08 s)
+   debs2022-gc-trading-day-11-11-21.csv: replay done: sent 55547846 messages (2047 distinct symbols) in 33.94 s (first to last row sent: 33.82 s)
+   debs2022-gc-trading-day-12-11-21.csv: replay done: sent 56111183 messages (2047 distinct symbols) in 34.34 s (first to last row sent: 34.22 s)
+   debs2022-gc-trading-day-13-11-21.csv: replay done: sent 33398 messages (2047 distinct symbols) in 0.13 s (first to last row sent: 0.02 s)
+   debs2022-gc-trading-day-14-11-21.csv: replay done: sent 26113 messages (2047 distinct symbols) in 0.52 s (first to last row sent: 0.01 s)
+== loaded 289,116,808 records in 185 s (1,562,154 msg/s incl. container starts); disk: 14G

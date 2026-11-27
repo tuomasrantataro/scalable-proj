@@ -1,0 +1,167 @@
+== fresh topic live, results removed
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+== starting all services
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.10kB done
+#1 DONE 0.0s
+
+#2 [jobmanager internal] load build definition from Dockerfile
+#2 transferring dockerfile: 791B done
+#2 DONE 0.0s
+
+#3 [jobmanager internal] load metadata for docker.io/library/maven:3.9-eclipse-temurin-17
+#3 ...
+
+#4 [kafka-setup internal] load build definition from Dockerfile
+#4 transferring dockerfile: 978B done
+#4 DONE 0.1s
+
+#5 [jobmanager internal] load metadata for docker.io/library/flink:2.3.0-java17
+#5 DONE 0.1s
+
+#3 [jobmanager internal] load metadata for docker.io/library/maven:3.9-eclipse-temurin-17
+#3 DONE 0.1s
+
+#6 [kafka-setup internal] load metadata for docker.io/library/rust:1.98.1-slim-bookworm
+#6 DONE 0.1s
+
+#7 [kafka-setup internal] load metadata for docker.io/library/debian:bookworm-slim
+#7 DONE 0.2s
+
+#8 [jobmanager internal] load .dockerignore
+#8 transferring context: 2B done
+#8 DONE 0.0s
+
+#9 [jobmanager internal] load build context
+#9 DONE 0.0s
+
+#10 [kafka-setup internal] load .dockerignore
+#10 transferring context: 107B done
+#10 DONE 0.0s
+
+#11 [kafka-setup internal] load build context
+#11 DONE 0.0s
+
+#12 [kafka-setup stage-1 1/2] FROM docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+#12 resolve docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+#12 ...
+
+#13 [jobmanager stage-1 1/3] FROM docker.io/library/flink:2.3.0-java17@sha256:f64c0809c2adb7537a139736cbaa62ecff20e283bb1ea4a4e119d9a40ee75c0f
+#13 resolve docker.io/library/flink:2.3.0-java17@sha256:f64c0809c2adb7537a139736cbaa62ecff20e283bb1ea4a4e119d9a40ee75c0f 0.1s done
+#13 DONE 0.1s
+
+#14 [jobmanager build 1/6] FROM docker.io/library/maven:3.9-eclipse-temurin-17@sha256:1a352420f7aba21f5ad08df31bab55f74c013fb491f1ae8ab1dd7ff9ed698584
+#14 resolve docker.io/library/maven:3.9-eclipse-temurin-17@sha256:1a352420f7aba21f5ad08df31bab55f74c013fb491f1ae8ab1dd7ff9ed698584 0.1s done
+#14 DONE 0.1s
+
+#9 [jobmanager internal] load build context
+#9 transferring context: 4.43kB done
+#9 DONE 0.0s
+
+#15 [kafka-setup build 1/7] FROM docker.io/library/rust:1.98.1-slim-bookworm@sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730
+#15 resolve docker.io/library/rust:1.98.1-slim-bookworm@sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730 0.1s done
+#15 DONE 0.1s
+
+#12 [kafka-setup stage-1 1/2] FROM docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+#12 resolve docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc 0.1s done
+#12 DONE 0.1s
+
+#16 [jobmanager build 2/6] WORKDIR /build
+#16 CACHED
+
+#17 [jobmanager build 5/6] COPY src ./src
+#17 CACHED
+
+#18 [jobmanager build 6/6] RUN mvn -q -B package
+#18 CACHED
+
+#19 [jobmanager stage-1 2/3] COPY --from=build /build/target/flink-job.jar /opt/flink/usrlib/flink-job.jar
+#19 CACHED
+
+#20 [jobmanager build 3/6] COPY pom.xml .
+#20 CACHED
+
+#21 [jobmanager build 4/6] RUN mvn -q -B dependency:go-offline
+#21 CACHED
+
+#22 [jobmanager stage-1 3/3] RUN mkdir -p /flink-checkpoints && chown flink:flink /flink-checkpoints
+#22 CACHED
+
+#11 [kafka-setup internal] load build context
+#11 transferring context: 443B done
+#11 DONE 0.0s
+
+#23 [kafka-setup build 4/7] COPY Cargo.toml Cargo.lock ./
+#23 CACHED
+
+#24 [kafka-setup build 3/7] WORKDIR /build
+#24 CACHED
+
+#25 [kafka-setup build 6/7] COPY src ./src
+#25 CACHED
+
+#26 [kafka-setup build 7/7] RUN touch src/main.rs && cargo test --release --locked && cargo build --release --locked
+#26 CACHED
+
+#27 [kafka-setup build 5/7] RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release --locked && rm -rf src
+#27 CACHED
+
+#28 [kafka-setup build 2/7] RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ make libcurl4-openssl-dev && rm -rf /var/lib/apt/lists/*
+#28 CACHED
+
+#29 [kafka-setup stage-1 2/2] COPY --from=build /build/target/release/replay-producer /app/replay-producer
+#29 CACHED
+
+#30 [kafka-setup] exporting to image
+#30 exporting layers done
+#30 exporting manifest sha256:85c7cd04c21b5dbe7ab75d252a2eb89d20e6735d4ff51ccff4368fe61ae66e8d 0.0s done
+#30 exporting config sha256:52ae2e79cc7a3fc699a413f910c9e9f4ee9c2145869187303e7a5e6fba4d7de1 0.0s done
+#30 exporting attestation manifest sha256:6627f6bf21cca65a53157f7663a29a20e8e5554a92f3699e1b1956b53e088f7f 0.1s done
+#30 exporting manifest list sha256:4d651e7f327b4f70819c3ac8a07992cc3e0473a9f257c691a9a59596f3579c31 0.0s done
+#30 naming to docker.io/scalable/producer-rs:latest 0.0s done
+#30 unpacking to docker.io/scalable/producer-rs:latest 0.0s done
+#30 DONE 0.2s
+
+#31 [jobmanager] exporting to image
+#31 exporting layers done
+#31 exporting manifest sha256:63df1d4978bdd4afc426d257420db6d502b902ff684712134e4b5cf0429eaf56 done
+#31 exporting config sha256:91d537572beec38abf1523bb8e36efcabd4fe2f95ece43309d5237a51be58bd9 done
+#31 exporting attestation manifest sha256:754e0ff5c837da98dcc4a18bddf6dbbbafcb26c0290a02fba2fa01380492d1b0 0.0s done
+#31 exporting manifest list sha256:e5de114a9b1a9863ecbb3667eb1d0cbe8cdd1855e4a3c14db3faafcbf357f0f9 0.0s done
+#31 naming to docker.io/scalable/flink-job:latest 0.0s done
+#31 unpacking to docker.io/scalable/flink-job:latest 0.0s done
+#31 DONE 0.2s
+
+#32 [jobmanager] resolving provenance for metadata file
+#32 DONE 0.0s
+
+#33 [kafka-setup] resolving provenance for metadata file
+#33 DONE 0.0s
+   Flink UI    http://localhost:8081
+   Grafana     http://localhost:3001   (admin/admin; Trading trends, Correctness, System metrics)
+   Prometheus  http://localhost:9090
+== replaying: debs2022-gc-trading-day-08-11-21.csv debs2022-gc-trading-day-09-11-21.csv debs2022-gc-trading-day-10-11-21.csv debs2022-gc-trading-day-11-11-21.csv debs2022-gc-trading-day-12-11-21.csv debs2022-gc-trading-day-13-11-21.csv debs2022-gc-trading-day-14-11-21.csv 
+   debs2022-gc-trading-day-08-11-21.csv: [replay-producer] replay done: sent 53994554 messages (5493 distinct symbols) in 52.09 s (first to last row sent: 51.95 s)
+   debs2022-gc-trading-day-09-11-21.csv: [replay-producer] replay done: sent 58811870 messages (5492 distinct symbols) in 47.04 s (first to last row sent: 46.90 s)
+   debs2022-gc-trading-day-10-11-21.csv: [replay-producer] replay done: sent 64591844 messages (5498 distinct symbols) in 51.35 s (first to last row sent: 51.17 s)
+   debs2022-gc-trading-day-11-11-21.csv: [replay-producer] replay done: sent 55547846 messages (5498 distinct symbols) in 44.27 s (first to last row sent: 44.13 s)
+   debs2022-gc-trading-day-12-11-21.csv: [replay-producer] replay done: sent 56111183 messages (5499 distinct symbols) in 44.54 s (first to last row sent: 44.38 s)
+   debs2022-gc-trading-day-13-11-21.csv: [replay-producer] replay done: sent 33398 messages (5499 distinct symbols) in 0.13 s (first to last row sent: 0.01 s)
+   debs2022-gc-trading-day-14-11-21.csv: [replay-producer] replay done: sent 26113 messages (5495 distinct symbols) in 0.12 s (first to last row sent: 0.01 s)
+== waiting for the job to process everything
+== done
+   1855645 ema_window rows, 7769 BUY, 3580 SELL
+   issue: TIME_SKEW 6681
+   issue: LATE 5506
+   issue: PRICE_JUMP 638
+   advisory messages: 11349
+== advisory latency: 11337 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  11      720      857      867
+   emitted → stored                  2       43      133      219
+   stored → received                 2       26       41      106
+   fired → received (total)         20      747      880      889
+   cold start (first close, 2021-11-08T07:05:00): 12 messages, fired → received p50 342 ms, max 508 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+   The system keeps running; stop it with: docker compose stop   (or tear down: see README)

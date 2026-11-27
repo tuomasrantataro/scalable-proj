@@ -1,0 +1,18 @@
+00:50:14 debs2022-gc-trading-day-08-11-21.csv: 53,994,554 rows, 11,856,695 price events, 381,409 windows (55.8 s)
+00:50:16 debs2022-gc-trading-day-09-11-21.csv: 58,811,870 rows, 11,962,322 price events, 379,616 windows (57.1 s)
+00:51:11 debs2022-gc-trading-day-11-11-21.csv: 55,547,846 rows, 11,897,615 price events, 377,047 windows (54.6 s)
+00:51:13 debs2022-gc-trading-day-10-11-21.csv: 64,591,844 rows, 12,124,970 price events, 380,486 windows (58.5 s)
+00:51:14 debs2022-gc-trading-day-13-11-21.csv: 33,398 rows, 5,179 price events, 5,179 windows (0.1 s)
+00:51:14 debs2022-gc-trading-day-14-11-21.csv: 26,113 rows, 0 price events, 0 windows (0.1 s)
+00:51:52 debs2022-gc-trading-day-12-11-21.csv: 56,111,183 rows, 11,855,576 price events, 378,641 windows (40.9 s)
+00:51:53 1,902,378 windows for 5,182 symbols; computing EMAs
+00:51:55 {"rows": 289116808, "price_events_used": 59702357, "zero_price_rows": 316382, "out_of_order_events": 5506, "late_events_dropped": 5695, "symbols": 5182, "windows": 1902378, "windows_with_zero_close": 46733, "advisories": 25834, "buy": 13826, "sell": 12008, "initial_advisories": 4970, "seconds": 157.0}
+00:52:50 debs2022-gc-trading-day-08-11-21.csv: 53,994,554 rows, 11,856,732 price events, 381,409 windows (53.7 s)
+00:52:52 debs2022-gc-trading-day-09-11-21.csv: 58,811,870 rows, 11,962,359 price events, 379,616 windows (55.3 s)
+00:53:46 debs2022-gc-trading-day-11-11-21.csv: 55,547,846 rows, 11,897,654 price events, 377,047 windows (53.6 s)
+00:53:48 debs2022-gc-trading-day-10-11-21.csv: 64,591,844 rows, 12,130,513 price events, 382,298 windows (57.6 s)
+00:53:48 debs2022-gc-trading-day-13-11-21.csv: 33,398 rows, 5,179 price events, 5,179 windows (0.1 s)
+00:53:48 debs2022-gc-trading-day-14-11-21.csv: 26,113 rows, 0 price events, 0 windows (0.1 s)
+00:54:27 debs2022-gc-trading-day-12-11-21.csv: 56,111,183 rows, 11,855,615 price events, 378,641 windows (40.4 s)
+00:54:28 1,904,190 windows for 5,182 symbols; computing EMAs
+00:54:30 {"rows": 289116808, "price_events_used": 59708052, "zero_price_rows": 316382, "out_of_order_events": 5506, "late_events_dropped": 0, "symbols": 5182, "windows": 1904190, "windows_with_zero_close": 46733, "advisories": 25830, "buy": 13824, "sell": 12006, "initial_advisories": 4970, "seconds": 153.9}

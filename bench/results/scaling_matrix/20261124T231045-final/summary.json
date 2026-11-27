@@ -1,0 +1,286 @@
+{
+ "digest": "19413a509d53044973e3e6b76c177af1",
+ "baseline": "1x1",
+ "configs": [
+  {
+   "spec": "1x1",
+   "taskmanagers": 1,
+   "slots": 1,
+   "parallelism": 1,
+   "valid": 3,
+   "wrong_digest": 0,
+   "failed": 0,
+   "time_s": 135.7,
+   "time_min": 132.4,
+   "time_max": 135.8,
+   "spread": 0.025055268975681694,
+   "records_per_s": 2130527,
+   "cpu_pct": {
+    "timescaledb": 44,
+    "grafana": 1,
+    "kafka": 89,
+    "advisory-latency": 0,
+    "prometheus": 0,
+    "taskmanager": 218,
+    "cadvisor": 1,
+    "jobmanager": 16
+   },
+   "busiest_task": [
+    "Source:_kafka_source____quality_gate",
+    751
+   ],
+   "mem_max_mb": {
+    "timescaledb": 172,
+    "grafana": 140,
+    "kafka": 1132,
+    "advisory-latency": 5,
+    "prometheus": 172,
+    "taskmanager": 1044,
+    "cadvisor": 35,
+    "jobmanager": 489,
+    "taskmanager heap": 452
+   },
+   "skew_records": {
+    "windows into ema": 1.0,
+    "read from Kafka": 1.0,
+    "price events into window": 1.0
+   },
+   "skew_busy": {
+    "window_5min____late_events": 1.0,
+    "timescaledb_issues:_Writer____timescaledb_issues:_Committer": 1.0,
+    "timescaledb_ema:_Writer": 1.0,
+    "ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer": 1.0,
+    "Source:_kafka_source____quality_gate": 1.0,
+    "timescaledb_ema:_Committer": 1.0
+   },
+   "latency_p50_ms": 67.0,
+   "latency_p99_ms": 527.0,
+   "speedup": 1.0,
+   "efficiency": 1.0
+  },
+  {
+   "spec": "2x1",
+   "taskmanagers": 2,
+   "slots": 1,
+   "parallelism": 2,
+   "valid": 3,
+   "wrong_digest": 0,
+   "failed": 0,
+   "time_s": 111.3,
+   "time_min": 84.3,
+   "time_max": 115.0,
+   "spread": 0.2758310871518419,
+   "records_per_s": 2598055,
+   "cpu_pct": {
+    "timescaledb": 58,
+    "grafana": 1,
+    "kafka": 95,
+    "advisory-latency": 0,
+    "prometheus": 0,
+    "taskmanager": 357,
+    "cadvisor": 1,
+    "jobmanager": 28
+   },
+   "busiest_task": [
+    "Source:_kafka_source____quality_gate",
+    566
+   ],
+   "mem_max_mb": {
+    "timescaledb": 184,
+    "grafana": 140,
+    "kafka": 1066,
+    "advisory-latency": 4,
+    "prometheus": 136,
+    "taskmanager": 2028,
+    "cadvisor": 35,
+    "jobmanager": 506,
+    "taskmanager heap": 878
+   },
+   "skew_records": {
+    "windows into ema": 1.004,
+    "read from Kafka": 1.044,
+    "price events into window": 1.016
+   },
+   "skew_busy": {
+    "window_5min____late_events": 1.009,
+    "timescaledb_issues:_Writer____timescaledb_issues:_Committer": 1.099,
+    "timescaledb_ema:_Writer": 1.006,
+    "ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer": 1.005,
+    "Source:_kafka_source____quality_gate": 1.004,
+    "timescaledb_ema:_Committer": 1.19
+   },
+   "latency_p50_ms": 29.0,
+   "latency_p99_ms": 480.0,
+   "speedup": 1.219227313566936,
+   "efficiency": 0.609613656783468
+  },
+  {
+   "spec": "4x1",
+   "taskmanagers": 4,
+   "slots": 1,
+   "parallelism": 4,
+   "valid": 3,
+   "wrong_digest": 0,
+   "failed": 0,
+   "time_s": 80.9,
+   "time_min": 77.8,
+   "time_max": 89.3,
+   "spread": 0.14215080346106304,
+   "records_per_s": 3573446,
+   "cpu_pct": {
+    "timescaledb": 109,
+    "grafana": 1,
+    "kafka": 105,
+    "advisory-latency": 0,
+    "prometheus": 1,
+    "taskmanager": 779,
+    "cadvisor": 1,
+    "jobmanager": 44
+   },
+   "busiest_task": [
+    "Source:_kafka_source____quality_gate",
+    698
+   ],
+   "mem_max_mb": {
+    "timescaledb": 197,
+    "grafana": 139,
+    "kafka": 1127,
+    "advisory-latency": 3,
+    "prometheus": 134,
+    "taskmanager": 3818,
+    "cadvisor": 36,
+    "jobmanager": 551,
+    "taskmanager heap": 1349
+   },
+   "skew_records": {
+    "windows into ema": 1.034,
+    "read from Kafka": 1.047,
+    "price events into window": 1.1
+   },
+   "skew_busy": {
+    "window_5min____late_events": 1.056,
+    "timescaledb_issues:_Writer____timescaledb_issues:_Committer": 1.421,
+    "timescaledb_ema:_Writer": 1.027,
+    "ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer": 1.026,
+    "Source:_kafka_source____quality_gate": 1.025,
+    "timescaledb_ema:_Committer": 1.377
+   },
+   "latency_p50_ms": 66.0,
+   "latency_p99_ms": 690.0,
+   "speedup": 1.6773794808405436,
+   "efficiency": 0.4193448702101359
+  },
+  {
+   "spec": "8x1",
+   "taskmanagers": 8,
+   "slots": 1,
+   "parallelism": 8,
+   "valid": 3,
+   "wrong_digest": 0,
+   "failed": 0,
+   "time_s": 101.8,
+   "time_min": 99.3,
+   "time_max": 107.5,
+   "spread": 0.08055009823182714,
+   "records_per_s": 2840549,
+   "cpu_pct": {
+    "timescaledb": 101,
+    "grafana": 1,
+    "kafka": 94,
+    "advisory-latency": 0,
+    "prometheus": 1,
+    "taskmanager": 963,
+    "cadvisor": 2,
+    "jobmanager": 44
+   },
+   "busiest_task": [
+    "Source:_kafka_source____quality_gate",
+    453
+   ],
+   "mem_max_mb": {
+    "timescaledb": 231,
+    "grafana": 139,
+    "kafka": 1128,
+    "advisory-latency": 2,
+    "prometheus": 157,
+    "taskmanager": 7113,
+    "cadvisor": 37,
+    "jobmanager": 705,
+    "taskmanager heap": 2174
+   },
+   "skew_records": {
+    "windows into ema": 1.077,
+    "read from Kafka": 1.333,
+    "price events into window": 1.148
+   },
+   "skew_busy": {
+    "window_5min____late_events": 1.081,
+    "timescaledb_issues:_Writer____timescaledb_issues:_Committer": 1.292,
+    "timescaledb_ema:_Writer": 1.072,
+    "ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer": 1.046,
+    "Source:_kafka_source____quality_gate": 1.125,
+    "timescaledb_ema:_Committer": 1.754
+   },
+   "latency_p50_ms": 21.0,
+   "latency_p99_ms": 396.0,
+   "speedup": 1.3330058939096265,
+   "efficiency": 0.16662573673870332
+  },
+  {
+   "spec": "2x4",
+   "taskmanagers": 2,
+   "slots": 4,
+   "parallelism": 8,
+   "valid": 3,
+   "wrong_digest": 0,
+   "failed": 0,
+   "time_s": 78.5,
+   "time_min": 78.0,
+   "time_max": 85.4,
+   "spread": 0.09426751592356696,
+   "records_per_s": 3685129,
+   "cpu_pct": {
+    "timescaledb": 126,
+    "grafana": 1,
+    "kafka": 106,
+    "advisory-latency": 0,
+    "prometheus": 1,
+    "taskmanager": 929,
+    "cadvisor": 1,
+    "jobmanager": 44
+   },
+   "busiest_task": [
+    "Source:_kafka_source____quality_gate",
+    820
+   ],
+   "mem_max_mb": {
+    "timescaledb": 229,
+    "grafana": 140,
+    "kafka": 1178,
+    "advisory-latency": 4,
+    "prometheus": 173,
+    "taskmanager": 2192,
+    "cadvisor": 37,
+    "jobmanager": 661,
+    "taskmanager heap": 784
+   },
+   "skew_records": {
+    "windows into ema": 1.077,
+    "read from Kafka": 1.333,
+    "price events into window": 1.148
+   },
+   "skew_busy": {
+    "window_5min____late_events": 1.108,
+    "timescaledb_issues:_Writer____timescaledb_issues:_Committer": 1.236,
+    "timescaledb_ema:_Writer": 1.059,
+    "ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer": 1.077,
+    "Source:_kafka_source____quality_gate": 1.117,
+    "timescaledb_ema:_Committer": 1.471
+   },
+   "latency_p50_ms": 35.0,
+   "latency_p99_ms": 206.0,
+   "speedup": 1.7286624203821654,
+   "efficiency": 0.21608280254777068
+  }
+ ]
+}

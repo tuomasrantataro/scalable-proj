@@ -1,0 +1,62 @@
+{
+ "digest": "19413a509d53044973e3e6b76c177af1",
+ "baseline": "4x1",
+ "configs": [
+  {
+   "spec": "4x1",
+   "taskmanagers": 4,
+   "slots": 1,
+   "parallelism": 4,
+   "valid": 3,
+   "wrong_digest": 0,
+   "failed": 0,
+   "time_s": 91.0,
+   "time_min": 87.8,
+   "time_max": 91.2,
+   "spread": 0.037362637362637424,
+   "records_per_s": 3176026,
+   "cpu_pct": {
+    "cadvisor": 1,
+    "taskmanager": 740,
+    "timescaledb": 101,
+    "grafana": 1,
+    "kafka": 111,
+    "advisory-latency": 0,
+    "prometheus": 1,
+    "jobmanager": 41
+   },
+   "busiest_task": [
+    "Source:_kafka_source____quality_gate",
+    641
+   ],
+   "mem_max_mb": {
+    "taskmanager heap": 1303,
+    "cadvisor": 40,
+    "taskmanager": 3794,
+    "timescaledb": 266,
+    "grafana": 144,
+    "kafka": 1283,
+    "advisory-latency": 3,
+    "prometheus": 234,
+    "jobmanager": 571
+   },
+   "skew_records": {
+    "price events into window": 1.1,
+    "read from Kafka": 1.047,
+    "windows into ema": 1.034
+   },
+   "skew_busy": {
+    "timescaledb_ema:_Committer": 1.302,
+    "Source:_kafka_source____quality_gate": 1.031,
+    "timescaledb_issues:_Writer____timescaledb_issues:_Committer": 1.197,
+    "timescaledb_ema:_Writer": 1.032,
+    "ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer": 1.04,
+    "window_5min____late_events": 1.062
+   },
+   "latency_p50_ms": 33.0,
+   "latency_p99_ms": 636.0,
+   "speedup": 1.0,
+   "efficiency": 1.0
+  }
+ ]
+}

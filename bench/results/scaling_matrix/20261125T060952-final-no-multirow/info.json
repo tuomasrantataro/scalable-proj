@@ -1,0 +1,19 @@
+{
+ "configs": [
+  {
+   "spec": "4x1",
+   "taskmanagers": 4,
+   "slots": 1,
+   "parallelism": 4
+  }
+ ],
+ "repeats": 3,
+ "baseline": null,
+ "settings": {
+  "JDBC_URL": "jdbc:postgresql://timescaledb:5432/trading"
+ },
+ "workload": "real",
+ "cpus": 16,
+ "records": 289116808,
+ "partitions": 8
+}

@@ -1,0 +1,60 @@
+25 Nov 00:41:32 full run, version 168f1cd
+25 Nov 00:41:32 A1-host: started
+25 Nov 00:41:32 A1-host: ok, 0 min
+25 Nov 00:41:32 A2-start: started
+25 Nov 00:42:00 A2-start: ok, 0 min
+25 Nov 00:42:00 A3-reference: started
+25 Nov 00:44:57 A3-reference: ok, 2 min
+25 Nov 00:44:57 A3-dataset: started
+25 Nov 00:49:18 A3-dataset: ok, 4 min
+25 Nov 00:49:18 A3-alternatives: started
+25 Nov 00:54:30 A3-alternatives: ok, 5 min
+25 Nov 00:54:30 A4-smoke: started
+25 Nov 01:03:44 A4-smoke: ok, 9 min
+25 Nov 01:03:44 A5-load: started
+25 Nov 01:07:17 A5-load: ok, 3 min
+25 Nov 01:07:17 A5-week: started
+25 Nov 01:10:42 A5-week: ok, 3 min
+25 Nov 01:10:42 A6-scaling: started
+25 Nov 02:03:28 A6-scaling: ok, 52 min
+25 Nov 02:03:28 A7-load: started
+25 Nov 02:06:44 A7-load: ok, 3 min
+25 Nov 02:06:44 A7-uniform: started
+25 Nov 02:37:27 A7-uniform: ok, 30 min
+25 Nov 02:37:27 A8-sweep: started
+25 Nov 03:39:00 A8-sweep: ok, 61 min
+25 Nov 03:39:00 A8-rep1: started
+25 Nov 03:45:21 A8-rep1: ok, 6 min
+25 Nov 03:45:21 A8-rep2: started
+25 Nov 03:51:50 A8-rep2: ok, 6 min
+25 Nov 03:51:50 A8-rep3: started
+25 Nov 03:58:11 A8-rep3: ok, 6 min
+25 Nov 03:58:11 A8-delay: started
+25 Nov 04:42:50 A8-delay: ok, 44 min
+25 Nov 04:42:50 A9-peaks: started
+25 Nov 05:35:54 A9-peaks: ok, 53 min
+25 Nov 05:35:54 A9-session: started
+25 Nov 05:48:43 A9-session: ok, 12 min
+25 Nov 05:48:43 A10-all: started
+25 Nov 06:11:41 A10-all: ok, 22 min
+25 Nov 06:11:41 A10-sample: started
+25 Nov 06:27:03 A10-sample: ok, 15 min
+25 Nov 06:27:03 A10b-realistic: started
+25 Nov 07:16:08 A10b-realistic: ok, 49 min
+25 Nov 07:16:08 A10b-bursts: started
+25 Nov 07:44:08 A10b-bursts: ok, 28 min
+25 Nov 07:44:08 A10b-saturation: started
+25 Nov 08:00:06 A10b-saturation: ok, 15 min
+25 Nov 08:00:06 A10c-default: started
+25 Nov 08:09:49 A10c-default: ok, 9 min
+25 Nov 08:09:49 A10c-no-multirow: started
+25 Nov 08:21:46 A10c-no-multirow: ok, 11 min
+25 Nov 08:21:46 A10c-checkpoint1s: started
+25 Nov 08:31:34 A10c-checkpoint1s: ok, 9 min
+25 Nov 08:31:34 A10c-no-alignment: started
+25 Nov 08:37:03 A10c-no-alignment: ok, 5 min
+25 Nov 08:37:03 A10c-failover: started
+25 Nov 08:40:56 A10c-failover: ok, 3 min
+25 Nov 08:40:56 A11-live: started
+25 Nov 08:47:26 A11-live: ok, 6 min
+25 Nov 08:47:26 finished: 29 steps ok, 0 failed; see bench/results/final/summary.md

@@ -1,0 +1,41 @@
+{
+ "configs": [
+  {
+   "spec": "1x1",
+   "taskmanagers": 1,
+   "slots": 1,
+   "parallelism": 1
+  },
+  {
+   "spec": "2x1",
+   "taskmanagers": 2,
+   "slots": 1,
+   "parallelism": 2
+  },
+  {
+   "spec": "4x1",
+   "taskmanagers": 4,
+   "slots": 1,
+   "parallelism": 4
+  },
+  {
+   "spec": "8x1",
+   "taskmanagers": 8,
+   "slots": 1,
+   "parallelism": 8
+  },
+  {
+   "spec": "2x4",
+   "taskmanagers": 2,
+   "slots": 4,
+   "parallelism": 8
+  }
+ ],
+ "repeats": 3,
+ "baseline": null,
+ "settings": {},
+ "workload": "real",
+ "cpus": 16,
+ "records": 289116808,
+ "partitions": 8
+}

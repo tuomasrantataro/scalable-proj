@@ -1,0 +1,100 @@
+== sweep over speeds 1,3,10,30,100,300,0 (debs2022-gc-trading-day-08-11-21.csv 09:00-09:36); results in bench/results/latency_sweep/20261125T003727-final
+== 1x: debs2022-gc-trading-day-08-11-21.csv, 09:00-09:36, group sweep-20261125T003729
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job fc1ba5ecf4bd583a648f1ec197714eee RUNNING at 00:37:56 UTC
+   sent 4,701,673 rows in 2159.0 s: 2,178 events/s
+== advisory latency: 266 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   4       98       99      100
+   emitted → stored                  2        4        5        5
+   stored → received                 1        3        4        4
+   fired → received (total)          8       99      101      101
+   cold start (first close, 2021-11-08T09:05:00): 3652 messages, fired → received p50 211 ms, max 289 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+   windows fired -> emitted after the first close: n=19,338, p50 3 ms, p99 100 ms; first close: n=3,652, p50 195 ms
+== 3x: debs2022-gc-trading-day-08-11-21.csv, 09:00-09:36, group sweep-20261125T011437
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job aa2e00ba16941d94d4caee46041490ce RUNNING at 01:15:06 UTC
+   sent 4,701,673 rows in 719.7 s: 6,533 events/s
+== advisory latency: 266 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   4       98       99       99
+   emitted → stored                  1        5        7        7
+   stored → received                 1        3        4        5
+   fired → received (total)          9       99      100      100
+   cold start (first close, 2021-11-08T09:05:00): 3652 messages, fired → received p50 174 ms, max 259 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+   windows fired -> emitted after the first close: n=19,338, p50 3 ms, p99 99 ms; first close: n=3,652, p50 150 ms
+== 10x: debs2022-gc-trading-day-08-11-21.csv, 09:00-09:36, group sweep-20261125T012747
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job cf36efb55d3a0fdf7a957cbc390f7296 RUNNING at 01:28:17 UTC
+   sent 4,701,673 rows in 215.9 s: 21,777 events/s
+== advisory latency: 266 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   4       73       82       92
+   emitted → stored                  2        6        7       10
+   stored → received                 1        3        5        5
+   fired → received (total)          8       74       83       94
+   cold start (first close, 2021-11-08T09:05:00): 3652 messages, fired → received p50 189 ms, max 328 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+   windows fired -> emitted after the first close: n=19,338, p50 3 ms, p99 92 ms; first close: n=3,652, p50 172 ms
+== 30x: debs2022-gc-trading-day-08-11-21.csv, 09:00-09:36, group sweep-20261125T013234
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 1410b43527ad3b61eec29e7b41f1b518 RUNNING at 01:33:03 UTC
+   sent 4,701,673 rows in 72.0 s: 65,328 events/s
+== advisory latency: 266 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   4       78       98       98
+   emitted → stored                  1        3        3        4
+   stored → received                 1        3        4        4
+   fired → received (total)          8       81       99      100
+   cold start (first close, 2021-11-08T09:05:00): 3652 messages, fired → received p50 353 ms, max 496 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+   windows fired -> emitted after the first close: n=19,338, p50 3 ms, p99 98 ms; first close: n=3,652, p50 314 ms
+== 100x: debs2022-gc-trading-day-08-11-21.csv, 09:00-09:36, group sweep-20261125T013456
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 578bab4abb0817b4a13eb824a58aec8f RUNNING at 01:35:25 UTC
+   sent 4,701,673 rows in 21.6 s: 217,771 events/s
+== advisory latency: 266 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   4       47       88       88
+   emitted → stored                  2        5        6        6
+   stored → received                 1        3        4        4
+   fired → received (total)         10       48       92       94
+   cold start (first close, 2021-11-08T09:05:00): 3652 messages, fired → received p50 500 ms, max 868 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+   windows fired -> emitted after the first close: n=19,338, p50 3 ms, p99 85 ms; first close: n=3,652, p50 466 ms
+== 300x: debs2022-gc-trading-day-08-11-21.csv, 09:00-09:36, group sweep-20261125T013628
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 59f17f1a9dfdec9eaefba45aaba064de RUNNING at 01:36:58 UTC
+   sent 4,701,673 rows in 7.6 s: 617,828 events/s
+== advisory latency: 266 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   9       81       94       99
+   emitted → stored                  7       23       37       40
+   stored → received                 3        8       10       10
+   fired → received (total)         21       90      104      104
+   cold start (first close, 2021-11-08T09:05:00): 3652 messages, fired → received p50 625 ms, max 850 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+   windows fired -> emitted after the first close: n=19,338, p50 9 ms, p99 99 ms; first close: n=3,652, p50 594 ms
+== max: debs2022-gc-trading-day-08-11-21.csv, 09:00-09:36, group sweep-20261125T013747
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 0a75db4f3f8725b0700fac1e40bc4ff5 RUNNING at 01:38:16 UTC
+   sent 4,701,673 rows in 7.9 s: 595,148 events/s
+== advisory latency: 266 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                 100      213      218      220
+   emitted → stored                  9       22       26       30
+   stored → received                 5       21       25       25
+   fired → received (total)        129      240      242      243
+   cold start (first close, 2021-11-08T09:05:00): 3652 messages, fired → received p50 586 ms, max 755 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+   windows fired -> emitted after the first close: n=19,338, p50 8 ms, p99 214 ms; first close: n=3,652, p50 548 ms
+== done: bench/results/latency_sweep/20261125T003727-final/latency.html

@@ -1,0 +1,467 @@
+== 15 runs: 1x1#1 2x1#1 4x1#1 8x1#1 2x4#1 2x1#2 4x1#2 8x1#2 2x4#2 1x1#2 4x1#3 8x1#3 2x4#3 1x1#3 2x1#3
+
+== run 1/15: 1x1, parallelism 1, repeat 1
+== backlog of 289,116,808 records (real); TaskManagers=1 slots=1 parallelism=1 group=backlog-20261124T231047
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job ba95b1c37f1dfe16ed8d776c7dce2497 RUNNING at 23:11:08 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  34      358      524      524
+   emitted → stored                  1        1        2        2
+   stored → received                 1        4        6        6
+   fired → received (total)         35      360      527      527
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 34 ms, max 34 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 132.4 s (job RUNNING → last output row): 2,182,854 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 1,854,158/s, max 2,325,695/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       786 /  186  Source:_kafka_source____quality_gate
+       534 /    0  timescaledb_ema:_Writer
+       298 /  155  window_5min____late_events
+        47 /  349  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+         6 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         3 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 218, kafka 90, timescaledb 44, jobmanager 16, cadvisor 1, grafana 1, advisory-latency 0, prometheus 0
+   memory MB, max: kafka 1245, taskmanager 1010, jobmanager 508, taskmanager heap 453, timescaledb 176, grafana 138, prometheus 90, cadvisor 35, advisory-latency 5
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.0, price events into window 1.0, windows into ema 1.0
+   busy time, max/mean over subtasks: Source:_kafka_source 1.0, timescaledb_ema:_Writer 1.0, window_5min 1.0
+   appended to bench/results/backlog_runs.jsonl
+
+== run 2/15: 2x1, parallelism 2, repeat 1
+== backlog of 289,116,808 records (real); TaskManagers=2 slots=1 parallelism=2 group=backlog-20261124T231450
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job a9388ff1bcf76a902bc44438afc3095e RUNNING at 23:15:12 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  65      392      459      459
+   emitted → stored                  1        7       30       30
+   stored → received                 1        3        5        5
+   fired → received (total)         67      392      466      466
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 69 ms, max 69 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 111.3 s (job RUNNING → last output row): 2,598,055 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,253,206/s, max 2,831,730/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       566 /   87  Source:_kafka_source____quality_gate
+       373 /    0  timescaledb_ema:_Writer
+       229 /  107  window_5min____late_events
+        34 /  260  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+         3 /    0  timescaledb_ema:_Committer
+         3 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+   CPU % of a core: taskmanager 357, kafka 94, timescaledb 58, jobmanager 28, cadvisor 1, grafana 1, advisory-latency 0, prometheus 0
+   memory MB, max: taskmanager 2028, kafka 1087, taskmanager heap 913, jobmanager 526, timescaledb 184, grafana 138, prometheus 91, cadvisor 35, advisory-latency 4
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.044, price events into window 1.016, windows into ema 1.004
+   busy time, max/mean over subtasks: Source:_kafka_source 1.026, timescaledb_ema:_Writer 1.001, window_5min 1.009
+   appended to bench/results/backlog_runs.jsonl
+
+== run 3/15: 4x1, parallelism 4, repeat 1
+== backlog of 289,116,808 records (real); TaskManagers=4 slots=1 parallelism=4 group=backlog-20261124T231829
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 27780ab31280dfe473a4e77ef83475d5 RUNNING at 23:18:53 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  23      240      507      507
+   emitted → stored                  3      102      253      253
+   stored → received                 1        8       20       20
+   fired → received (total)         54      260      683      683
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 210 ms, max 210 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 89.3 s (job RUNNING → last output row): 3,237,880 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,461,713/s, max 3,479,318/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       635 /    9  Source:_kafka_source____quality_gate
+       399 /    0  timescaledb_ema:_Writer
+       289 /   17  window_5min____late_events
+        48 /  142  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+         7 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         4 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 734, kafka 105, timescaledb 98, jobmanager 44, cadvisor 1, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 3822, taskmanager heap 1505, kafka 1127, jobmanager 578, timescaledb 199, grafana 137, prometheus 104, cadvisor 36, advisory-latency 2
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.047, price events into window 1.1, windows into ema 1.034
+   busy time, max/mean over subtasks: Source:_kafka_source 1.025, timescaledb_ema:_Writer 1.04, window_5min 1.056
+   appended to bench/results/backlog_runs.jsonl
+
+== run 4/15: 8x1, parallelism 8, repeat 1
+== backlog of 289,116,808 records (real); TaskManagers=8 slots=1 parallelism=8 group=backlog-20261124T232153
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 0d698d06bb8c8dc25ac6ebd5d1a39403 RUNNING at 23:22:22 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   5      125      177      177
+   emitted → stored                  6      186      245      245
+   stored → received                 2       22       46       46
+   fired → received (total)         21      260      311      311
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 270 ms, max 270 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 101.8 s (job RUNNING → last output row): 2,840,549 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,197,502/s, max 3,642,221/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       453 /    0  Source:_kafka_source____quality_gate
+       323 /    0  timescaledb_ema:_Writer
+       242 /    0  window_5min____late_events
+        55 /   18  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+        14 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         6 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 963, timescaledb 101, kafka 94, jobmanager 42, cadvisor 2, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 6885, taskmanager heap 2174, kafka 1218, jobmanager 705, timescaledb 231, grafana 137, prometheus 124, cadvisor 36, advisory-latency 2
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.333, price events into window 1.148, windows into ema 1.077
+   busy time, max/mean over subtasks: Source:_kafka_source 1.147, ema 1.072, timescaledb_ema:_Writer 1.092, window_5min 1.143
+   appended to bench/results/backlog_runs.jsonl
+
+== run 5/15: 2x4, parallelism 8, repeat 1
+== backlog of 289,116,808 records (real); TaskManagers=2 slots=4 parallelism=8 group=backlog-20261124T232525
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job f9c52d50c07e5cd88b9a42b8fbeda109 RUNNING at 23:25:47 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  12      103      243      243
+   emitted → stored                  7       62      219      219
+   stored → received                 3       13       28       28
+   fired → received (total)         35      138      262      262
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 183 ms, max 183 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 78.5 s (job RUNNING → last output row): 3,685,129 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,519,297/s, max 3,830,232/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       820 /    0  Source:_kafka_source____quality_gate
+       420 /    0  timescaledb_ema:_Writer
+       420 /    0  window_5min____late_events
+        79 /   24  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+        13 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         5 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 929, timescaledb 128, kafka 108, jobmanager 44, cadvisor 1, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 2175, kafka 1190, taskmanager heap 767, jobmanager 661, timescaledb 229, prometheus 151, grafana 139, cadvisor 38, advisory-latency 4
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.333, price events into window 1.148, windows into ema 1.077
+   busy time, max/mean over subtasks: Source:_kafka_source 1.086, ema 1.117, timescaledb_ema:_Writer 1.059, window_5min 1.131
+   appended to bench/results/backlog_runs.jsonl
+
+== run 6/15: 2x1, parallelism 2, repeat 2
+== backlog of 289,116,808 records (real); TaskManagers=2 slots=1 parallelism=2 group=backlog-20261124T232838
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 5c2efc57777467f1b83e3913e65bb00e RUNNING at 23:28:59 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  21      375      473      473
+   emitted → stored                  1        7       27       27
+   stored → received                 1        5        7        7
+   fired → received (total)         29      377      480      480
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 75 ms, max 75 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 115.0 s (job RUNNING → last output row): 2,513,491 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,336,741/s, max 2,904,306/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       534 /   74  Source:_kafka_source____quality_gate
+       360 /    0  timescaledb_ema:_Writer
+       224 /   95  window_5min____late_events
+        34 /  243  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+         8 /    0  timescaledb_ema:_Committer
+         6 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+   CPU % of a core: taskmanager 352, kafka 95, timescaledb 57, jobmanager 23, cadvisor 1, grafana 1, advisory-latency 0, prometheus 0
+   memory MB, max: taskmanager 2026, kafka 1023, taskmanager heap 878, jobmanager 506, timescaledb 184, grafana 140, prometheus 136, cadvisor 35, advisory-latency 4
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.044, price events into window 1.016, windows into ema 1.004
+   busy time, max/mean over subtasks: Source:_kafka_source 1.004, timescaledb_ema:_Writer 1.011, window_5min 1.016
+   appended to bench/results/backlog_runs.jsonl
+
+== run 7/15: 4x1, parallelism 4, repeat 2
+== backlog of 289,116,808 records (real); TaskManagers=4 slots=1 parallelism=4 group=backlog-20261124T233224
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 81895896906db55730545dd06c6cfc77 RUNNING at 23:32:48 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  80      622      643      643
+   emitted → stored                  4      134      167      167
+   stored → received                 2        7       10       10
+   fired → received (total)         87      688      690      690
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 166 ms, max 166 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 80.9 s (job RUNNING → last output row): 3,573,446 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,711,432/s, max 3,935,965/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       698 /   16  Source:_kafka_source____quality_gate
+       473 /    0  timescaledb_ema:_Writer
+       330 /   26  window_5min____late_events
+        57 /  186  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+        12 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         6 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 779, timescaledb 110, kafka 108, jobmanager 44, cadvisor 1, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 3818, taskmanager heap 1305, kafka 1154, jobmanager 530, timescaledb 194, grafana 139, prometheus 134, cadvisor 35, advisory-latency 3
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.047, price events into window 1.1, windows into ema 1.034
+   busy time, max/mean over subtasks: Source:_kafka_source 1.034, ema 1.026, timescaledb_ema:_Writer 1.024, window_5min 1.031
+   appended to bench/results/backlog_runs.jsonl
+
+== run 8/15: 8x1, parallelism 8, repeat 2
+== backlog of 289,116,808 records (real); TaskManagers=8 slots=1 parallelism=8 group=backlog-20261124T233542
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job c62158d47293406f1fc5a38d4d9b8c27 RUNNING at 23:36:11 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  30      417      617      617
+   emitted → stored                 11      221      323      323
+   stored → received                 4       23       25       25
+   fired → received (total)         63      435      646      646
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 304 ms, max 304 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 99.3 s (job RUNNING → last output row): 2,912,928 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,013,752/s, max 3,613,536/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       804 /    0  Source:_kafka_source____quality_gate
+       543 /    0  timescaledb_ema:_Writer
+       397 /    1  window_5min____late_events
+        87 /   64  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+        20 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         7 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 1172, timescaledb 118, kafka 87, jobmanager 47, cadvisor 2, prometheus 2, grafana 1, advisory-latency 0
+   memory MB, max: taskmanager 7121, taskmanager heap 2161, kafka 1098, jobmanager 705, timescaledb 231, prometheus 157, grafana 139, cadvisor 37, advisory-latency 3
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.333, price events into window 1.148, windows into ema 1.077
+   busy time, max/mean over subtasks: Source:_kafka_source 1.125, ema 1.046, timescaledb_ema:_Writer 1.07, window_5min 1.081
+   appended to bench/results/backlog_runs.jsonl
+
+== run 9/15: 2x4, parallelism 8, repeat 2
+== backlog of 289,116,808 records (real); TaskManagers=2 slots=4 parallelism=8 group=backlog-20261124T233924
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 37e2a6da17d26401cd126c81fb899724 RUNNING at 23:39:46 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   5      140      192      192
+   emitted → stored                  4       87      168      168
+   stored → received                 2       15       18       18
+   fired → received (total)         23      166      206      206
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 253 ms, max 253 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 85.4 s (job RUNNING → last output row): 3,383,699 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,595,269/s, max 3,618,781/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       513 /    0  Source:_kafka_source____quality_gate
+       306 /    0  timescaledb_ema:_Writer
+       271 /    0  window_5min____late_events
+        54 /   26  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+        10 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         8 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 848, timescaledb 117, kafka 106, jobmanager 42, cadvisor 1, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 2201, kafka 1110, taskmanager heap 784, jobmanager 700, timescaledb 224, prometheus 173, grafana 140, cadvisor 35, advisory-latency 4
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.333, price events into window 1.148, windows into ema 1.077
+   busy time, max/mean over subtasks: Source:_kafka_source 1.117, ema 1.077, timescaledb_ema:_Writer 1.058, window_5min 1.108
+   appended to bench/results/backlog_runs.jsonl
+
+== run 10/15: 1x1, parallelism 1, repeat 2
+== backlog of 289,116,808 records (real); TaskManagers=1 slots=1 parallelism=1 group=backlog-20261124T234238
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 0bb3fe9d335061711bf6f407fff0ebb9 RUNNING at 23:42:59 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  64      322      539      539
+   emitted → stored                  1        2        2        2
+   stored → received                 0        4        6        6
+   fired → received (total)         67      324      541      541
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 39 ms, max 39 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 135.7 s (job RUNNING → last output row): 2,130,527 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 1,875,337/s, max 2,294,903/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       746 /  185  Source:_kafka_source____quality_gate
+       516 /    0  timescaledb_ema:_Writer
+       288 /  162  window_5min____late_events
+        47 /  344  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+         9 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         1 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 216, kafka 89, timescaledb 44, jobmanager 16, cadvisor 1, grafana 1, advisory-latency 0, prometheus 0
+   memory MB, max: kafka 1117, taskmanager 1044, jobmanager 489, taskmanager heap 444, prometheus 172, timescaledb 171, grafana 140, cadvisor 35, advisory-latency 4
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.0, price events into window 1.0, windows into ema 1.0
+   busy time, max/mean over subtasks: Source:_kafka_source 1.0, timescaledb_ema:_Writer 1.0, window_5min 1.0
+   appended to bench/results/backlog_runs.jsonl
+
+== run 11/15: 4x1, parallelism 4, repeat 3
+== backlog of 289,116,808 records (real); TaskManagers=4 slots=1 parallelism=4 group=backlog-20261124T234640
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job e5e4ad3b79116ae02805c53d6a3dd691 RUNNING at 23:47:04 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  63      583      590      590
+   emitted → stored                  3      109      155      155
+   stored → received                 1        9       23       23
+   fired → received (total)         66      604      700      700
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 132 ms, max 132 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 77.8 s (job RUNNING → last output row): 3,718,018 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,702,578/s, max 3,862,369/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       751 /   18  Source:_kafka_source____quality_gate
+       515 /    0  timescaledb_ema:_Writer
+       363 /   25  window_5min____late_events
+        59 /  167  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+        11 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         7 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 798, timescaledb 109, kafka 101, jobmanager 46, cadvisor 1, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 3721, taskmanager heap 1349, kafka 1090, jobmanager 551, timescaledb 197, prometheus 154, grafana 139, cadvisor 37, advisory-latency 3
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.047, price events into window 1.1, windows into ema 1.034
+   busy time, max/mean over subtasks: Source:_kafka_source 1.01, ema 1.034, timescaledb_ema:_Writer 1.027, window_5min 1.068
+   appended to bench/results/backlog_runs.jsonl
+
+== run 12/15: 8x1, parallelism 8, repeat 3
+== backlog of 289,116,808 records (real); TaskManagers=8 slots=1 parallelism=8 group=backlog-20261124T234952
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 80dca0fbfc072e790d19b626f31c2530 RUNNING at 23:50:22 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   9      210      392      392
+   emitted → stored                  4      260      335      335
+   stored → received                 2       29       44       44
+   fired → received (total)         17      386      396      396
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 391 ms, max 391 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 107.5 s (job RUNNING → last output row): 2,688,683 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,132,563/s, max 3,530,517/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       365 /    0  Source:_kafka_source____quality_gate
+       277 /    0  timescaledb_ema:_Writer
+       204 /    2  window_5min____late_events
+        49 /   25  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+        13 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         6 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 896, kafka 97, timescaledb 92, jobmanager 44, cadvisor 1, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 7113, taskmanager heap 2320, kafka 1128, jobmanager 763, timescaledb 231, prometheus 182, grafana 142, cadvisor 37, advisory-latency 2
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.333, price events into window 1.148, windows into ema 1.077
+   busy time, max/mean over subtasks: Source:_kafka_source 1.092, timescaledb_ema:_Writer 1.072, window_5min 1.067
+   appended to bench/results/backlog_runs.jsonl
+
+== run 13/15: 2x4, parallelism 8, repeat 3
+== backlog of 289,116,808 records (real); TaskManagers=2 slots=4 parallelism=8 group=backlog-20261124T235338
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 3350acdb40bb928a4e6a11d4b933a38f RUNNING at 23:54:00 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                   8      104      143      143
+   emitted → stored                  9       51      141      141
+   stored → received                 3       14       29       29
+   fired → received (total)         37      138      150      150
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 189 ms, max 189 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 78.0 s (job RUNNING → last output row): 3,704,963 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,541,125/s, max 3,853,219/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       846 /    0  Source:_kafka_source____quality_gate
+       438 /    0  window_5min____late_events
+       430 /    0  timescaledb_ema:_Writer
+        81 /   25  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+        14 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         5 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 1002, timescaledb 126, kafka 101, jobmanager 45, cadvisor 1, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 2192, kafka 1178, taskmanager heap 787, jobmanager 647, timescaledb 229, prometheus 202, grafana 142, cadvisor 37, advisory-latency 4
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.333, price events into window 1.148, windows into ema 1.077
+   busy time, max/mean over subtasks: Source:_kafka_source 1.119, ema 1.052, timescaledb_ema:_Writer 1.075, window_5min 1.104
+   appended to bench/results/backlog_runs.jsonl
+
+== run 14/15: 1x1, parallelism 1, repeat 3
+== backlog of 289,116,808 records (real); TaskManagers=1 slots=1 parallelism=1 group=backlog-20261124T235645
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 481dc49e90edfd9de1e63ef386929915 RUNNING at 23:57:06 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  75      368      504      504
+   emitted → stored                  1        2        4        4
+   stored → received                 0        5        6        6
+   fired → received (total)         77      370      506      506
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 31 ms, max 31 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 135.8 s (job RUNNING → last output row): 2,129,680 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 1,940,575/s, max 2,307,044/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       751 /  197  Source:_kafka_source____quality_gate
+       514 /    0  timescaledb_ema:_Writer
+       288 /  172  window_5min____late_events
+        47 /  349  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+         4 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         3 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 218, kafka 87, timescaledb 42, jobmanager 14, cadvisor 1, grafana 1, advisory-latency 0, prometheus 0
+   memory MB, max: kafka 1132, taskmanager 1062, jobmanager 477, taskmanager heap 452, prometheus 204, timescaledb 172, grafana 142, cadvisor 37, advisory-latency 6
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.0, price events into window 1.0, windows into ema 1.0
+   busy time, max/mean over subtasks: Source:_kafka_source 1.0, timescaledb_ema:_Writer 1.0, window_5min 1.0
+   appended to bench/results/backlog_runs.jsonl
+
+== run 15/15: 2x1, parallelism 2, repeat 3
+== backlog of 289,116,808 records (real); TaskManagers=2 slots=1 parallelism=2 group=backlog-20261125T000047
+== reset: stopping Flink, removing results (the events in topic ticks are kept)
+   advisory-latency started
+   job 18e86ca829391c5b509a6a8248614f3a RUNNING at 00:01:09 UTC
+== advisory latency: 72 messages received live after the first window close (0 repeats, 0 stored before the consumer started)
+   ms                              p50      p95      p99      max
+   fired → emitted                  19      258      512      512
+   emitted → stored                  2       10       24       24
+   stored → received                 1        6        9        9
+   fired → received (total)         27      259      523      523
+   cold start (first close, 2021-11-08T07:05:00): 1 messages, fired → received p50 89 ms, max 89 ms (not included above)
+   appended to bench/results/advisory_latency.jsonl
+== drained in 84.3 s (job RUNNING → last output row): 3,427,870 records/s overall
+   read rate (all source subtasks, 5 s samples): avg 2,562,422/s, max 3,622,680/s
+   output: 1,855,645 ema_window rows, 7769 BUY, 3580 SELL; issues {'LATE': '5506', 'TIME_SKEW': '6681', 'PRICE_JUMP': '638'}
+   digest 19413a509d53044973e3e6b76c177af1  (= reference week)
+   busy / backpressured ms/s (avg over subtasks):
+       893 /   56  Source:_kafka_source____quality_gate
+       577 /    0  timescaledb_ema:_Writer
+       356 /   52  window_5min____late_events
+        53 /  245  ema____advisories_only____subscriptions____kafka_advisories:_Writer____kafka_advisories:_Committer
+         6 /    0  timescaledb_issues:_Writer____timescaledb_issues:_Committer
+         4 /    0  timescaledb_ema:_Committer
+   CPU % of a core: taskmanager 516, kafka 104, timescaledb 80, jobmanager 33, cadvisor 1, grafana 1, prometheus 1, advisory-latency 0
+   memory MB, max: taskmanager 2076, kafka 1066, taskmanager heap 757, jobmanager 473, timescaledb 183, prometheus 177, grafana 142, cadvisor 36, advisory-latency 4
+   skew, max/mean: Kafka partitions 1.333, read from Kafka 1.044, price events into window 1.016, windows into ema 1.004
+   busy time, max/mean over subtasks: Source:_kafka_source 1.004, ema 1.005, timescaledb_ema:_Writer 1.006, window_5min 1.008
+   appended to bench/results/backlog_runs.jsonl
+
+# Scaling matrix
+
+289,116,808 records (real), 8 partitions, settings default, host with 16 CPUs. Medians over the valid runs; baseline 1x1, digest `19413a509d53044973e3e6b76c177af1`.
+
+| TaskManagers × slots | Parallelism | Runs | Time (s) | Min–max | Spread | Records/s | Speedup | Efficiency | Busiest task (ms/s) | CPU % TaskManagers / TimescaleDB / Kafka | Memory MB (same) | Skew events / windows / busy | Advisory latency p50 / p99 (ms) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 × 1 | 1 | 3 | 135.7 | 132.4–135.8 | 3% | 2,130,527 | 1.00 | 100% | Source:_kafka_source 751 | 218 / 44 / 89 | 1,044 / 172 / 1,132 | 1.00 / 1.00 / 1.00 | 67 / 527 |
+| 2 × 1 | 2 | 3 | 111.3 | 84.3–115.0 | 28% | 2,598,055 | 1.22 | 61% | Source:_kafka_source 566 | 357 / 58 / 95 | 2,028 / 184 / 1,066 | 1.02 / 1.00 / 1.00 | 29 / 480 |
+| 4 × 1 | 4 | 3 | 80.9 | 77.8–89.3 | 14% | 3,573,446 | 1.68 | 42% | Source:_kafka_source 698 | 779 / 109 / 105 | 3,818 / 197 / 1,127 | 1.10 / 1.03 / 1.02 | 66 / 690 |
+| 8 × 1 | 8 | 3 | 101.8 | 99.3–107.5 | 8% | 2,840,549 | 1.33 | 17% | Source:_kafka_source 453 | 963 / 101 / 94 | 7,113 / 231 / 1,128 | 1.15 / 1.08 / 1.12 | 21 / 396 |
+| 2 × 4 | 8 | 3 | 78.5 | 78.0–85.4 | 9% | 3,685,129 | 1.73 | 22% | Source:_kafka_source 820 | 929 / 126 / 106 | 2,192 / 229 / 1,178 | 1.15 / 1.08 / 1.12 | 35 / 206 |
+
+
+== done: bench/results/scaling_matrix/20261124T231045-final
+all runs valid, digest 19413a509d53044973e3e6b76c177af1

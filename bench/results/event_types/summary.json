@@ -1,0 +1,172 @@
+{
+ "days": [
+  "08",
+  "09",
+  "10",
+  "11",
+  "12",
+  "13",
+  "14"
+ ],
+ "symbols": 5502,
+ "rows": [
+  {
+   "exchange": "ETR",
+   "sec_type": "E",
+   "type": "housekeeping",
+   "rows": 389461
+  },
+  {
+   "exchange": "ETR",
+   "sec_type": "E",
+   "type": "no payload",
+   "rows": 1455700
+  },
+  {
+   "exchange": "ETR",
+   "sec_type": "E",
+   "type": "price",
+   "rows": 5690680
+  },
+  {
+   "exchange": "ETR",
+   "sec_type": "E",
+   "type": "quote",
+   "rows": 16622132
+  },
+  {
+   "exchange": "ETR",
+   "sec_type": "I",
+   "type": "housekeeping",
+   "rows": 12222
+  },
+  {
+   "exchange": "ETR",
+   "sec_type": "I",
+   "type": "no payload",
+   "rows": 20509
+  },
+  {
+   "exchange": "ETR",
+   "sec_type": "I",
+   "type": "price",
+   "rows": 26603836
+  },
+  {
+   "exchange": "FR",
+   "sec_type": "E",
+   "type": "housekeeping",
+   "rows": 3220962
+  },
+  {
+   "exchange": "FR",
+   "sec_type": "E",
+   "type": "no payload",
+   "rows": 91963263
+  },
+  {
+   "exchange": "FR",
+   "sec_type": "E",
+   "type": "price",
+   "rows": 3194112
+  },
+  {
+   "exchange": "FR",
+   "sec_type": "E",
+   "type": "quote",
+   "rows": 41427738
+  },
+  {
+   "exchange": "FR",
+   "sec_type": "I",
+   "type": "housekeeping",
+   "rows": 272716
+  },
+  {
+   "exchange": "FR",
+   "sec_type": "I",
+   "type": "no payload",
+   "rows": 64553
+  },
+  {
+   "exchange": "FR",
+   "sec_type": "I",
+   "type": "price",
+   "rows": 18187734
+  },
+  {
+   "exchange": "NL",
+   "sec_type": "E",
+   "type": "housekeeping",
+   "rows": 1732978
+  },
+  {
+   "exchange": "NL",
+   "sec_type": "E",
+   "type": "no payload",
+   "rows": 49581038
+  },
+  {
+   "exchange": "NL",
+   "sec_type": "E",
+   "type": "price",
+   "rows": 1725397
+  },
+  {
+   "exchange": "NL",
+   "sec_type": "E",
+   "type": "quote",
+   "rows": 22518016
+  },
+  {
+   "exchange": "NL",
+   "sec_type": "I",
+   "type": "housekeeping",
+   "rows": 107535
+  },
+  {
+   "exchange": "NL",
+   "sec_type": "I",
+   "type": "no payload",
+   "rows": 19933
+  },
+  {
+   "exchange": "NL",
+   "sec_type": "I",
+   "type": "price",
+   "rows": 4306293
+  }
+ ],
+ "zero_prices": [
+  {
+   "exchange": "ETR",
+   "sec_type": "E",
+   "rows": 294727
+  },
+  {
+   "exchange": "ETR",
+   "sec_type": "I",
+   "rows": 3786
+  },
+  {
+   "exchange": "FR",
+   "sec_type": "E",
+   "rows": 5654
+  },
+  {
+   "exchange": "FR",
+   "sec_type": "I",
+   "rows": 8775
+  },
+  {
+   "exchange": "NL",
+   "sec_type": "E",
+   "rows": 1100
+  },
+  {
+   "exchange": "NL",
+   "sec_type": "I",
+   "rows": 2340
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+# Event handling
+
+| Events | Count | Share | Handling |
+|---|---|---|---|
+| Rows in topic live | 289,116,808 | 100.00% |  |
+| No price (`Last` empty) | 229,408,756 | 79.35% | skipped |
+| Price events | 59,708,052 | 20.65% |  |
+| - zero_price | 316,382 | 0.11% | dropped, counted |
+| - malformed | 0 | 0.00% | dropped, stored |
+| - negative_price | 0 | 0.00% | dropped, stored |
+| - implausible_time | 0 | 0.00% | dropped, stored |
+| - late (window already evaluated) | 5,506 | 0.00% | dropped, stored |
+| - used in windows | 59,386,164 | 20.54% | close and tick count |
+
+| Reported issues (data_issue) | Count |
+|---|---|
+| LATE | 5,506 |
+| PRICE_JUMP | 638 |
+| TIME_SKEW | 6,681 |
+
+Results: 1,855,645 windows of 4,970 symbols, 7,769 BUY, 3,580 SELL (4,970 initial).
+Check: usable = late + used in windows (exact)

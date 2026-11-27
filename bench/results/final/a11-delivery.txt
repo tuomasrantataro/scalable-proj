@@ -1,0 +1,4 @@
+subscriptions  subscriptions-all.txt: 1 traders
+messages       11,349 (0 repeats)
+delivered      11,349 of 11,349 expected, 0 missing, 0 unexpected
+CORRECT
